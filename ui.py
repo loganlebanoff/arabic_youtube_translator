@@ -1,5 +1,6 @@
 import streamlit as st
 import pafy
+import datetime
 
 url = st.text_input('YouTube URL:', 'https://www.youtube.com/watch?v=2VKy2VibTX0')
 
@@ -8,10 +9,13 @@ video_length = video.length
 
 empty = st.empty()
 
-start_time = st.slider('Time', 0, video_length, step=1)
 
+time_0 = datetime.datetime(2020, 3, 16, 0, 0, 0)
+time_1 = time_0 + datetime.timedelta(seconds=video.length)
+start_time = st.slider('Time', time_0, time_1, step=datetime.timedelta(seconds=1), format='HH:mm:ss')
 
-embed_url = url.replace('watch?v=', 'embed/') + '?&autoplay=1&start=' + str(start_time)
+start_secs = int((start_time-time_0).total_seconds())
+embed_url = url.replace('watch?v=', 'embed/') + '?&autoplay=1&start=' + str(start_secs)
 
 my_html = '''<style>
 .video-background {
