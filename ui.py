@@ -5,14 +5,22 @@ import time
 import youtube_dl
 import azure.cognitiveservices.speech as speechsdk
 import librosa
+import os
+import threading
+# from streamlit.ReportThread import add_report_ctx
+#
+# # Your thread creation code:
+# thread = threading.Thread(target=runInThread, args=(onExit, PopenArgs))
+# add_report_ctx(thread)
+# thread.start()
 
 
-# # @st.cache
+@st.cache
 def get_video_length(filename):
     return librosa.get_duration(filename=filename)
 
 
-# @st.cache
+@st.cache(hash_funcs={"builtins.SwigPyObject": lambda _: None})
 def load_translation_config():
     # Set up the subscription info for the Speech Service:
     # Replace with your own subscription key and service region (e.g., "westus").
@@ -31,7 +39,7 @@ def load_translation_config():
     translation_config.output_format = speechsdk.OutputFormat(1)
     return translation_config
 
-# @st.cache
+@st.cache(hash_funcs={"builtins.SwigPyObject": lambda _: None})
 def translate(translation_config, file):
     audio_config = speechsdk.AudioConfig(filename=file)
     recognizer = speechsdk.translation.TranslationRecognizer(
@@ -62,8 +70,9 @@ def translate(translation_config, file):
             print("Error details: {}".format(result.cancellation_details.error_details))
     a=0
 
-# @st.cache
 def download_video(url, filename):
+    if os.path.exists(filename):
+        return
     ydl_opts = {
         'format': 'bestaudio/best',
         'postprocessors': [{
@@ -88,9 +97,8 @@ def download_video(url, filename):
     # exit()
 
 
-
-# @st.cache
-def process_video(translation_config, filename, transcript_empty):
+@st.cache
+def get_boundaries(filename):
     from pyannote.audio.pipelines import VoiceActivityDetection
     pipeline = VoiceActivityDetection(segmentation="pyannote/segmentation")
     HYPER_PARAMETERS = {
@@ -104,16 +112,22 @@ def process_video(translation_config, filename, transcript_empty):
     pipeline.instantiate(HYPER_PARAMETERS)
     vad = pipeline(filename)
     boundaries = vad._timeline.segments_boundaries_
-    print(boundaries)
+    return boundaries
+
+
+@st.cache(hash_funcs={"builtins.SwigPyObject": lambda _: None})
+def process_video(translation_config, filename, boundaries):
 
     from pydub import AudioSegment
     audio_segment = AudioSegment.from_wav(filename)
+    start_end_translation_list = []
     for clip_idx, start, end in zip(range(len(boundaries) // 2), boundaries[::2], boundaries[1::2]):
         newAudio = audio_segment[start*1000:end*1000]
         clip_file = filename.split('.wav')[0] + '_clip_%05d.wav' % clip_idx
         newAudio.export(clip_file, format="wav")  # Exports to a wav file in the current path.
         translation = translate(translation_config, clip_file)
-        transcript_empty.markdown(translation)
+        start_end_translation_list.append((start, end, translation))
+    return start_end_translation_list
 
 def main():
     url = st.text_input('YouTube URL:', 'https://www.youtube.com/watch?v=2VKy2VibTX0')
@@ -124,6 +138,8 @@ def main():
     video_length = get_video_length(filename)
 
     empty = st.empty()
+
+    transcript_empty = st.empty()
 
 
     time_0 = datetime.datetime(2020, 3, 16, 0, 0, 0)
@@ -155,14 +171,46 @@ def main():
 </div>
     '''.replace('<video>', embed_url)
 
+    if st.button('Stop captions'):
+        st.stop()
+
 
     # empty.video(url, start_time=start_time)
     empty.markdown(my_html, unsafe_allow_html=True)
 
-    transcript_empty = st.empty()
-
     translation_config = load_translation_config()
-    process_video(translation_config, filename, transcript_empty)
+    boundaries = get_boundaries(filename)
+    print(boundaries)
+    print(len(boundaries))
+    start_end_translation_list = process_video(translation_config, filename, boundaries)
+    for clip_idx, (start, end, translation) in enumerate(start_end_translation_list):
+        print(start, end, translation)
+
+    is_first_running = True
+    for clip_idx, (start, end, translation) in enumerate(start_end_translation_list):
+        if end < start_secs:
+            continue
+        if clip_idx == 0:
+            if start_secs == 0:
+                time.sleep(start)
+            elif start > start_secs:
+                time.sleep(start - start_secs)
+        if is_first_running:
+            is_first_running = False
+            time.sleep(2.5)
+        else:
+            prev_end = start_end_translation_list[clip_idx-1][1]
+            if start_secs > prev_end:
+                time.sleep(start - start_secs)
+            else:
+                time.sleep(start - prev_end)
+        if translation is None:
+            translation = '.'
+        transcript_empty.markdown('## ' + translation)
+        if start_secs > start:
+            time.sleep(end - start_secs)
+        else:
+            time.sleep(end - start)
 
 
 if __name__ == '__main__':
