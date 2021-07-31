@@ -7,7 +7,7 @@ import azure.cognitiveservices.speech as speechsdk
 import librosa
 import os
 from keys import AZURE_KEY, AZURE_REGION
-
+import json
 
 @st.cache
 def get_video_length(filename):
@@ -93,57 +93,97 @@ def download_video(url, filename):
 
 @st.cache
 def get_boundaries(filename):
-    from pyannote.audio.pipelines import VoiceActivityDetection
-    pipeline = VoiceActivityDetection(segmentation="pyannote/segmentation")
-    HYPER_PARAMETERS = {
-      # onset/offset activation thresholds
-      "onset": 0.8, "offset": 0.8,
-      # remove speech regions shorter than that many seconds.
-      "min_duration_on": 0.0,
-      # fill non-speech regions shorter than that many seconds.
-      "min_duration_off": 0.0
-    }
-    pipeline.instantiate(HYPER_PARAMETERS)
-    vad = pipeline(filename)
-    boundaries = vad._timeline.segments_boundaries_
-    return boundaries
+    boundaries_file = filename.replace('.wav', '.bounds')
+    if os.path.exists(boundaries_file):
+        return json.load(open(boundaries_file, encoding='utf8'))
+    else:
+        from pyannote.audio.pipelines import VoiceActivityDetection
+        pipeline = VoiceActivityDetection(segmentation="pyannote/segmentation")
+        HYPER_PARAMETERS = {
+          # onset/offset activation thresholds
+          "onset": 0.8, "offset": 0.8,
+          # remove speech regions shorter than that many seconds.
+          "min_duration_on": 0.0,
+          # fill non-speech regions shorter than that many seconds.
+          "min_duration_off": 0.0
+        }
+        pipeline.instantiate(HYPER_PARAMETERS)
+        vad = pipeline(filename)
+        boundaries = list(vad._timeline.segments_boundaries_)
+        json.dump(boundaries, open(boundaries_file, 'w', encoding='utf8'))
+        return boundaries
 
 
 @st.cache(hash_funcs={"builtins.SwigPyObject": lambda _: None})
-def process_video(translation_config, filename, boundaries):
+def process_video(translation_config, youtube_id, boundaries):
+    processed_file = os.path.join('data', youtube_id, 'processed.json')
+    if os.path.exists(processed_file):
+        return json.load(open(processed_file, encoding='utf8'))
+    else:
+        from pydub import AudioSegment
+        audio_segment = AudioSegment.from_wav(os.path.join('data', youtube_id, 'full.wav'))
+        start_end_translation_list = []
+        for clip_idx, start, end in zip(range(len(boundaries) // 2), boundaries[::2], boundaries[1::2]):
+            newAudio = audio_segment[start*1000:end*1000]
+            clip_file = os.path.join('data', youtube_id, 'clip_%05d.wav' % clip_idx)
+            newAudio.export(clip_file, format="wav")  # Exports to a wav file in the current path.
+            translation = translate(translation_config, clip_file)
+            start_end_translation_list.append((start, end, translation))
+        json.dump(start_end_translation_list, open(processed_file, 'w', encoding='utf8'))
+        return start_end_translation_list
 
-    from pydub import AudioSegment
-    audio_segment = AudioSegment.from_wav(filename)
-    start_end_translation_list = []
-    for clip_idx, start, end in zip(range(len(boundaries) // 2), boundaries[::2], boundaries[1::2]):
-        newAudio = audio_segment[start*1000:end*1000]
-        clip_file = filename.split('.wav')[0] + '_clip_%05d.wav' % clip_idx
-        newAudio.export(clip_file, format="wav")  # Exports to a wav file in the current path.
-        translation = translate(translation_config, clip_file)
-        start_end_translation_list.append((start, end, translation))
-    return start_end_translation_list
+
+def sleep(seconds, transcript_empty):
+    interval = 0.1
+    while seconds >= interval:
+        if st.session_state.should_stop:
+            transcript_empty.markdown('## stop')
+            return
+        time.sleep(interval)
+        seconds -= interval
+    if st.session_state.should_stop:
+        transcript_empty.markdown('## stop')
+        return
+    time.sleep(seconds)
+
+
+def stop_current_captions():
+    print('stopping')
+    st.session_state.should_stop = True
+
 
 def main():
-    url = st.text_input('YouTube URL:', 'https://www.youtube.com/watch?v=2VKy2VibTX0')
+    st.session_state.should_stop = False
+    if not os.path.exists('data'):
+        os.makedirs('data')
+
+    url_empty = st.empty()
+    url_radio = st.radio("Use example video", ['No', 'Yes'])
+    initial_url = '' if url_radio == 'No' else 'https://www.youtube.com/watch?v=2VKy2VibTX0'
+
+
+    url = url_empty.text_input('YouTube URL:', value=initial_url, key='youtube_url_input')
 
     print(url)
-    filename = url.split('?v=')[-1] + '.wav'
-    download_video(url, filename)
-    video_length = get_video_length(filename)
+    if url != '':
+        youtube_id = url.split('?v=')[-1]
+        filename = os.path.join('data', youtube_id, 'full.wav')
+        download_video(url, filename)
+        video_length = get_video_length(filename)
 
-    empty = st.empty()
+        empty = st.empty()
 
-    transcript_empty = st.empty()
+        transcript_empty = st.empty()
 
 
-    time_0 = datetime.datetime(2020, 3, 16, 0, 0, 0)
-    time_1 = time_0 + datetime.timedelta(seconds=video_length)
-    start_time = st.slider('Time', time_0, time_1, step=datetime.timedelta(seconds=1), format='HH:mm:ss')
+        time_0 = datetime.datetime(2020, 3, 16, 0, 0, 0)
+        time_1 = time_0 + datetime.timedelta(seconds=video_length)
+        start_time = st.slider('Time', time_0, time_1, step=datetime.timedelta(seconds=1), format='HH:mm:ss', on_change=stop_current_captions)
 
-    start_secs = int((start_time-time_0).total_seconds())
-    embed_url = url.replace('watch?v=', 'embed/') + '?&autoplay=1&start=' + str(start_secs)
+        start_secs = int((start_time-time_0).total_seconds())
+        embed_url = url.replace('watch?v=', 'embed/') + '?&autoplay=1&start=' + str(start_secs)
 
-    my_html = '''<style>
+        my_html = '''<style>
 .video-background { 
   position: relative;
   padding-bottom: 56.25%;
@@ -163,48 +203,48 @@ def main():
 <div class="video-background">
 <iframe src="<video>" title="YouTube video player" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe>
 </div>
-    '''.replace('<video>', embed_url)
+        '''.replace('<video>', embed_url)
 
-    if st.button('Stop captions'):
-        st.stop()
+        if st.button('Stop captions'):
+            st.stop()
 
 
-    # empty.video(url, start_time=start_time)
-    empty.markdown(my_html, unsafe_allow_html=True)
+        # empty.video(url, start_time=start_time)
+        empty.markdown(my_html, unsafe_allow_html=True)
 
-    translation_config = load_translation_config()
-    boundaries = get_boundaries(filename)
-    print(boundaries)
-    print(len(boundaries))
-    start_end_translation_list = process_video(translation_config, filename, boundaries)
-    for clip_idx, (start, end, translation) in enumerate(start_end_translation_list):
-        print(start, end, translation)
+        translation_config = load_translation_config()
+        boundaries = get_boundaries(filename)
+        # print(boundaries)
+        # print(len(boundaries))
+        start_end_translation_list = process_video(translation_config, youtube_id, boundaries)
+        # for clip_idx, (start, end, translation) in enumerate(start_end_translation_list):
+        #     print(start, end, translation)
 
-    is_first_running = True
-    for clip_idx, (start, end, translation) in enumerate(start_end_translation_list):
-        if end < start_secs:
-            continue
-        if clip_idx == 0:
-            if start_secs == 0:
-                time.sleep(start)
-            elif start > start_secs:
-                time.sleep(start - start_secs)
-        if is_first_running:
-            is_first_running = False
-            time.sleep(2.5)
-        else:
-            prev_end = start_end_translation_list[clip_idx-1][1]
-            if start_secs > prev_end:
-                time.sleep(start - start_secs)
+        is_first_running = True
+        for clip_idx, (start, end, translation) in enumerate(start_end_translation_list):
+            if end < start_secs:
+                continue
+            if clip_idx == 0:
+                if start_secs == 0:
+                    sleep(start, transcript_empty)
+                elif start > start_secs:
+                    sleep(start - start_secs, transcript_empty)
+            if is_first_running:
+                is_first_running = False
+                sleep(2.5, transcript_empty)
             else:
-                time.sleep(start - prev_end)
-        if translation is None:
-            translation = '.'
-        transcript_empty.markdown('## ' + translation)
-        if start_secs > start:
-            time.sleep(end - start_secs)
-        else:
-            time.sleep(end - start)
+                prev_end = start_end_translation_list[clip_idx-1][1]
+                if start_secs > prev_end:
+                    sleep(start - start_secs, transcript_empty)
+                else:
+                    sleep(start - prev_end, transcript_empty)
+            if translation is None:
+                translation = '.'
+            transcript_empty.markdown('## ' + translation)
+            if start_secs > start:
+                sleep(end - start_secs, transcript_empty)
+            else:
+                sleep(end - start, transcript_empty)
 
 
 if __name__ == '__main__':
