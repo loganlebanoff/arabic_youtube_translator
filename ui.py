@@ -6,8 +6,11 @@ import youtube_dl
 import azure.cognitiveservices.speech as speechsdk
 import librosa
 import os
-from keys import AZURE_KEY, AZURE_REGION
+#from keys import AZURE_KEY, AZURE_REGION
 
+AZURE_KEY = st.secrets('AZURE_KEY')
+
+AZURE_REGION = st.secrets('AZURE_REGION')
 
 @st.cache
 def get_video_length(filename):
