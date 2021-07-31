@@ -6,13 +6,7 @@ import youtube_dl
 import azure.cognitiveservices.speech as speechsdk
 import librosa
 import os
-import threading
-# from streamlit.ReportThread import add_report_ctx
-#
-# # Your thread creation code:
-# thread = threading.Thread(target=runInThread, args=(onExit, PopenArgs))
-# add_report_ctx(thread)
-# thread.start()
+from keys import AZURE_KEY, AZURE_REGION
 
 
 @st.cache
@@ -24,7 +18,7 @@ def get_video_length(filename):
 def load_translation_config():
     # Set up the subscription info for the Speech Service:
     # Replace with your own subscription key and service region (e.g., "westus").
-    speech_key, service_region = "0340be178e1e4695bdd5540353f6a949", "eastus"
+    speech_key, service_region = AZURE_KEY, AZURE_REGION
 
     # Specify the path to an audio file containing speech (mono WAV / PCM with a sampling rate of 16
     # kHz).
