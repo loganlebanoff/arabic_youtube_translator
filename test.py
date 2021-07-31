@@ -1,13 +1,14 @@
 import time
 import glob
 import azure.cognitiveservices.speech as speechsdk
+from keys import AZURE_KEY, AZURE_REGION
 
 
 def main():
 
     # Set up the subscription info for the Speech Service:
     # Replace with your own subscription key and service region (e.g., "westus").
-    speech_key, service_region = "0340be178e1e4695bdd5540353f6a949", "eastus"
+    speech_key, service_region = AZURE_KEY, AZURE_REGION
 
     # Specify the path to an audio file containing speech (mono WAV / PCM with a sampling rate of 16
     # kHz).
