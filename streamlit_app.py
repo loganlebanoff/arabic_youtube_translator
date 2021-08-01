@@ -7,9 +7,9 @@ import azure.cognitiveservices.speech as speechsdk
 import os
 #from keys import AZURE_KEY, AZURE_REGION
 
-AZURE_KEY = st.secrets('AZURE_KEY')
+AZURE_KEY = st.secrets['AZURE_KEY']
 
-AZURE_REGION = st.secrets('AZURE_REGION')
+AZURE_REGION = st.secrets['AZURE_REGION']
 
 import wave
 import contextlib
