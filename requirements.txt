@@ -1,6 +1,6 @@
 numpy
 cffi
-libsndfile==1.0.28
+libsndfile
 https://github.com/pyannote/pyannote-audio/archive/develop.zip
 pafy
 tqdm
