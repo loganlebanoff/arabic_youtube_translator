@@ -6,6 +6,7 @@ import youtube_dl
 import azure.cognitiveservices.speech as speechsdk
 import os
 import json
+import shutil
 #from keys import AZURE_KEY, AZURE_REGION
 
 AZURE_KEY = st.secrets['AZURE_KEY']
@@ -15,7 +16,6 @@ AZURE_REGION = st.secrets['AZURE_REGION']
 import wave
 import contextlib
 
-@st.cache
 def get_video_length(filename):
     with contextlib.closing(wave.open(filename, 'r')) as f:
         frames = f.getnframes()
@@ -24,7 +24,6 @@ def get_video_length(filename):
     return duration
 
 
-@st.cache(hash_funcs={"builtins.SwigPyObject": lambda _: None})
 def load_translation_config():
     # Set up the subscription info for the Speech Service:
     # Replace with your own subscription key and service region (e.g., "westus").
@@ -43,7 +42,6 @@ def load_translation_config():
     translation_config.output_format = speechsdk.OutputFormat(1)
     return translation_config
 
-@st.cache(hash_funcs={"builtins.SwigPyObject": lambda _: None})
 def translate(translation_config, file):
     audio_config = speechsdk.AudioConfig(filename=file)
     recognizer = speechsdk.translation.TranslationRecognizer(
@@ -102,7 +100,6 @@ def download_video(url, filename):
     # exit()
 
 
-@st.cache
 def get_boundaries(filename):
     boundaries_file = filename.replace('.wav', '.bounds')
     if os.path.exists(boundaries_file):
@@ -125,7 +122,6 @@ def get_boundaries(filename):
         return boundaries
 
 
-@st.cache(hash_funcs={"builtins.SwigPyObject": lambda _: None})
 def process_video(translation_config, youtube_id, boundaries):
     processed_file = os.path.join('data', youtube_id, 'processed.json')
     if os.path.exists(processed_file):
@@ -143,7 +139,6 @@ def process_video(translation_config, youtube_id, boundaries):
         json.dump(start_end_translation_list, open(processed_file, 'w', encoding='utf8'))
         return start_end_translation_list
 
-@st.cache
 def postprocess(start_end_translation_list, youtube_id):
     postprocessed_file = os.path.join('data', youtube_id, 'postprocessed.json')
     if os.path.exists(postprocessed_file):
@@ -181,6 +176,10 @@ def stop_current_captions():
     print('stopping')
     st.session_state.should_stop = True
 
+def delete_cache(youtube_id):
+    shutil.rmtree(os.path.join('data', youtube_id))
+    st.success('Cache deleted')
+
 
 def main():
     st.session_state.should_stop = False
@@ -198,7 +197,8 @@ def main():
     if url != '':
         youtube_id = url.split('?v=')[-1]
         filename = os.path.join('data', youtube_id, 'full.wav')
-        download_video(url, filename)
+        with st.spinner('Downloading video'):
+            download_video(url, filename)
         video_length = get_video_length(filename)
 
         empty = st.empty()
@@ -235,21 +235,24 @@ def main():
 </div>
         '''.replace('<video>', embed_url)
 
-        if st.button('Stop captions'):
-            st.stop()
+        st.button('Delete cache for this video', on_click=delete_cache, args=[youtube_id])
 
 
         # empty.video(url, start_time=start_time)
         empty.markdown(my_html, unsafe_allow_html=True)
 
         translation_config = load_translation_config()
-        boundaries = get_boundaries(filename)
+        with st.spinner('Calculating boundaries'):
+            boundaries = get_boundaries(filename)
         # print(boundaries)
         # print(len(boundaries))
-        start_end_translation_list = process_video(translation_config, youtube_id, boundaries)
+        with st.spinner('Processing video'):
+            start_end_translation_list = process_video(translation_config, youtube_id, boundaries)
         # postprocessed_start_end_translation_list = postprocess(start_end_translation_list, youtube_id)
         # for clip_idx, (start, end, translation) in enumerate(start_end_translation_list):
         #     print(start, end, translation)
+
+        st.success('Captions created!')
 
         is_first_running = True
         for clip_idx, (start, end, translation, timestamps) in enumerate(start_end_translation_list):
