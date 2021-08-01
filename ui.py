@@ -4,14 +4,19 @@ import datetime
 import time
 import youtube_dl
 import azure.cognitiveservices.speech as speechsdk
-import librosa
 import os
 from keys import AZURE_KEY, AZURE_REGION
 import json
+import wave
+import contextlib
 
 @st.cache
 def get_video_length(filename):
-    return librosa.get_duration(filename=filename)
+    with contextlib.closing(wave.open(filename, 'r')) as f:
+        frames = f.getnframes()
+        rate = f.getframerate()
+        duration = frames / float(rate)
+    return duration
 
 
 @st.cache(hash_funcs={"builtins.SwigPyObject": lambda _: None})
@@ -53,7 +58,7 @@ def translate(translation_config, file):
         English translation: {}""".format(
             result.text, result.translations['en']))
         a=0
-        return result.translations['en']
+        return result.translations['en'], json.loads(result.json)['Words']
     elif result.reason == speechsdk.ResultReason.RecognizedSpeech:
         print("Recognized: {}".format(result.text))
     elif result.reason == speechsdk.ResultReason.NoMatch:
@@ -62,6 +67,7 @@ def translate(translation_config, file):
         print("Translation canceled: {}".format(result.cancellation_details.reason))
         if result.cancellation_details.reason == speechsdk.CancellationReason.Error:
             print("Error details: {}".format(result.cancellation_details.error_details))
+    return None, None
     a=0
 
 def download_video(url, filename):
@@ -127,10 +133,29 @@ def process_video(translation_config, youtube_id, boundaries):
             newAudio = audio_segment[start*1000:end*1000]
             clip_file = os.path.join('data', youtube_id, 'clip_%05d.wav' % clip_idx)
             newAudio.export(clip_file, format="wav")  # Exports to a wav file in the current path.
-            translation = translate(translation_config, clip_file)
-            start_end_translation_list.append((start, end, translation))
+            translation, timestamps = translate(translation_config, clip_file)
+            start_end_translation_list.append((start, end, translation, timestamps))
         json.dump(start_end_translation_list, open(processed_file, 'w', encoding='utf8'))
         return start_end_translation_list
+
+@st.cache
+def postprocess(start_end_translation_list, youtube_id):
+    postprocessed_file = os.path.join('data', youtube_id, 'postprocessed.json')
+    if os.path.exists(postprocessed_file):
+        return json.load(open(postprocessed_file, encoding='utf8'))
+    else:
+        postprocessed = []
+        for start, end, translation, timestamps in start_end_translation_list:
+            tokens = translation.strip().split()
+            collected_tokens = []
+            for token_idx, token in enumerate(tokens):
+                if token == timestamps[token_idx]:
+                    collected_tokens.append(token)
+                elif token in timestamps[token_idx]:
+                    collected_tokens.append(token)
+                    postprocessed.append(start, end, ' '.join(collected_tokens))
+
+
 
 
 def sleep(seconds, transcript_empty):
@@ -217,11 +242,12 @@ def main():
         # print(boundaries)
         # print(len(boundaries))
         start_end_translation_list = process_video(translation_config, youtube_id, boundaries)
+        # postprocessed_start_end_translation_list = postprocess(start_end_translation_list, youtube_id)
         # for clip_idx, (start, end, translation) in enumerate(start_end_translation_list):
         #     print(start, end, translation)
 
         is_first_running = True
-        for clip_idx, (start, end, translation) in enumerate(start_end_translation_list):
+        for clip_idx, (start, end, translation, timestamps) in enumerate(start_end_translation_list):
             if end < start_secs:
                 continue
             if clip_idx == 0:
