@@ -12,9 +12,16 @@ AZURE_KEY = st.secrets('AZURE_KEY')
 
 AZURE_REGION = st.secrets('AZURE_REGION')
 
+import wave
+import contextlib
+
 @st.cache
 def get_video_length(filename):
-    return librosa.get_duration(filename=filename)
+    with contextlib.closing(wave.open(filename, 'r')) as f:
+        frames = f.getnframes()
+        rate = f.getframerate()
+        duration = frames / float(rate)
+    return duration
 
 
 @st.cache(hash_funcs={"builtins.SwigPyObject": lambda _: None})
