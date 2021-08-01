@@ -1,13 +1,11 @@
+numpy
+cffi
+libsndfile==1.0.28
+https://github.com/pyannote/pyannote-audio/archive/develop.zip
 pafy
 tqdm
 python-dateutil
 azure
 youtube-dl
 azure-cognitiveservices-speech
-torch
-pyannote.audio==1.1.1
-pyannote.core
-pyannote.database
-pyannote.metrics
-pyannote.pipeline
 pydub
