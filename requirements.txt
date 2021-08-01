@@ -4,5 +4,10 @@ python-dateutil
 azure
 youtube-dl
 azure-cognitiveservices-speech
+pytorch
 pyannote.audio==1.1.1
+pyannote.core
+pyannote.database
+pyannote.metrics
+pyannote.pipeline
 pydub
