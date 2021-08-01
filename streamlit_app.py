@@ -5,8 +5,13 @@ import time
 import youtube_dl
 import azure.cognitiveservices.speech as speechsdk
 import os
-from keys import AZURE_KEY, AZURE_REGION
 import json
+#from keys import AZURE_KEY, AZURE_REGION
+
+AZURE_KEY = st.secrets['AZURE_KEY']
+
+AZURE_REGION = st.secrets['AZURE_REGION']
+
 import wave
 import contextlib
 
@@ -106,12 +111,12 @@ def get_boundaries(filename):
         from pyannote.audio.pipelines import VoiceActivityDetection
         pipeline = VoiceActivityDetection(segmentation="pyannote/segmentation")
         HYPER_PARAMETERS = {
-          # onset/offset activation thresholds
-          "onset": 0.8, "offset": 0.8,
-          # remove speech regions shorter than that many seconds.
-          "min_duration_on": 0.0,
-          # fill non-speech regions shorter than that many seconds.
-          "min_duration_off": 0.0
+        # onset/offset activation thresholds
+        "onset": 0.8, "offset": 0.8,
+        # remove speech regions shorter than that many seconds.
+        "min_duration_on": 0.0,
+        # fill non-speech regions shorter than that many seconds.
+        "min_duration_off": 0.0
         }
         pipeline.instantiate(HYPER_PARAMETERS)
         vad = pipeline(filename)
@@ -203,26 +208,26 @@ def main():
 
         time_0 = datetime.datetime(2020, 3, 16, 0, 0, 0)
         time_1 = time_0 + datetime.timedelta(seconds=video_length)
-        start_time = st.slider('Time', time_0, time_1, step=datetime.timedelta(seconds=1), format='HH:mm:ss', on_change=stop_current_captions)
+        start_time = st.slider('Time', time_0, time_1, step=datetime.timedelta(seconds=1), format='HH:mm:ss')
 
         start_secs = int((start_time-time_0).total_seconds())
         embed_url = url.replace('watch?v=', 'embed/') + '?&autoplay=1&start=' + str(start_secs)
 
         my_html = '''<style>
 .video-background { 
-  position: relative;
-  padding-bottom: 56.25%;
-  /* 16:9 */
-  padding-top: 25px;
-  height: 0;
+    position: relative;
+    padding-bottom: 56.25%;
+    /* 16:9 */
+    padding-top: 25px;
+    height: 0;
 }
 
 .video-background iframe {
-  position: absolute;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 100%;
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
 }
 </style>
 <div class="video-background">
