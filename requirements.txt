@@ -2,3 +2,4 @@ pafy
 tqdm
 python-dateutil
 azure
+youtube-dl
