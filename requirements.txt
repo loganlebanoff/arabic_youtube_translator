@@ -4,3 +4,4 @@ python-dateutil
 azure
 youtube-dl
 azure-cognitiveservices-speech
+librosa
