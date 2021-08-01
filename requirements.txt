@@ -4,3 +4,5 @@ python-dateutil
 azure
 youtube-dl
 azure-cognitiveservices-speech
+pyannote.audio
+pydub
