@@ -205,6 +205,12 @@ def postprocess(start_end_translation_list, youtube_id):
                 english_phrase = translation[prev_phrase_end_english: separator_idx+1].strip()
                 if english_phrase == '':
                     continue
+                if len(english_phrase) < 15 and phrase_idx != len(separator_indices) - 1:
+                    continue
+                if phrase_idx != len(separator_indices) - 1:
+                    next_english_phrase = translation[separator_idx+1: separator_indices[phrase_idx+1]+1].strip()
+                    if len(next_english_phrase) < 15:
+                        continue
                 ranges = get_ranges_in_range(arrange_enrange, prev_phrase_end_english, separator_idx+2)
                 if len(ranges) == 0:
                     a=0
