@@ -176,6 +176,12 @@ def get_ranges_in_range(arrange_enrange, start, end):
     valid_ranges = [r for r in arrange_enrange if r[2] >= start and r[3] < end]
     return valid_ranges
 
+def is_inside_ranges(arrange_enrange, separator_idx):
+    for range in arrange_enrange:
+        if separator_idx >= range[2] and separator_idx < range[3]-1:
+            return True
+    return False
+
 def postprocess(start_end_translation_list, youtube_id):
     postprocessed_file = os.path.join('data', youtube_id, 'postprocessed.json')
     if os.path.exists(postprocessed_file):
@@ -188,7 +194,8 @@ def postprocess(start_end_translation_list, youtube_id):
             arabic_text = recognition
             separators = [',', '.', '?']
             arabic_separators = ['،', '.', '؟']
-            separator_indices = [i for i, c in enumerate(translation) if c in separators] + [len(translation)]
+            separator_indices = [i for i, c in enumerate(translation) if c in separators and not is_inside_ranges(arrange_enrange, i)] + [len(translation)]
+
 
             prev_phrase_end_arabic = 0
             prev_phrase_end_english = 0
@@ -198,7 +205,9 @@ def postprocess(start_end_translation_list, youtube_id):
                 english_phrase = translation[prev_phrase_end_english: separator_idx+1].strip()
                 if english_phrase == '':
                     continue
-                ranges = get_ranges_in_range(arrange_enrange, prev_phrase_end_arabic, separator_idx+2)
+                ranges = get_ranges_in_range(arrange_enrange, prev_phrase_end_english, separator_idx+2)
+                if len(ranges) == 0:
+                    a=0
                 max_range = max(ranges, key=lambda x: x[1])
                 phrase_end = max_range[1]
                 arabic_phrase = arabic_text[prev_phrase_end_arabic: phrase_end].strip()
