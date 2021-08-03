@@ -7,6 +7,8 @@ import azure.cognitiveservices.speech as speechsdk
 import os
 import json
 import shutil
+from itertools import repeat
+import concurrent
 #from keys import AZURE_KEY, AZURE_REGION
 
 AZURE_KEY = st.secrets['AZURE_KEY']
@@ -52,6 +54,7 @@ def recognize(speech_config, file):
     # Note: Since recognize_once() returns only a single utterance, it is suitable only for single
     # shot recognition like command or query.
     # For long-running multi-utterance recognition, use start_continuous_recognition() instead.
+    print('Recognition job started')
     result = recognizer.recognize_once()
 
     # Check the result
@@ -90,12 +93,18 @@ def translate(recognition):
     body = [{
         'text': recognition,
     }]
+    print('Translation job started')
     request = requests.post(constructed_url, headers=headers, json=body)
     response = request.json()
     if 'error' in response or len(response) == 0 or len(response[0]['translations']) == 0:
         return None, None
     result = response[0]['translations'][0]
     return result['text'], result['alignment']['proj']
+
+def recognize_and_translate(speech_config, file, start, end):
+    recognition, recognition_info = recognize(speech_config, file)
+    translation, alignment = translate(recognition)
+    return recognition, recognition_info, translation, alignment, start, end
 
 def download_video(url, filename):
     if os.path.exists(filename):
@@ -154,12 +163,23 @@ def process_video(speech_config, youtube_id, boundaries):
         from pydub import AudioSegment
         audio_segment = AudioSegment.from_wav(os.path.join('data', youtube_id, 'full.wav'))
         start_end_translation_list = []
+        clip_files = []
+        starts = []
+        ends = []
         for clip_idx, start, end in zip(range(len(boundaries) // 2), boundaries[::2], boundaries[1::2]):
-            newAudio = audio_segment[start*1000:end*1000]
             clip_file = os.path.join('data', youtube_id, 'clip_%05d.wav' % clip_idx)
-            newAudio.export(clip_file, format="wav")  # Exports to a wav file in the current path.
-            recognition, recognition_info = recognize(speech_config, clip_file)
-            translation, alignment = translate(recognition)
+            if not os.path.exists(clip_file):
+                newAudio = audio_segment[start*1000:end*1000]
+                newAudio.export(clip_file, format="wav")  # Exports to a wav file in the current path.
+            clip_files.append(clip_file)
+            starts.append(start)
+            ends.append(end)
+
+        # We can use a with statement to ensure threads are cleaned up promptly
+        with concurrent.futures.ThreadPoolExecutor(max_workers=20) as executor:
+            results = list(executor.map(recognize_and_translate, repeat(speech_config), clip_files, starts, ends))
+        for result in results:
+            recognition, recognition_info, translation, alignment, start, end = result
             if translation is None:
                 continue
             start_end_translation_list.append((start, end, translation, alignment, recognition, recognition_info))
