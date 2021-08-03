@@ -213,6 +213,8 @@ def postprocess(start_end_translation_list, youtube_id):
                 arabic_phrase = arabic_text[prev_phrase_end_arabic: phrase_end].strip()
                 for sep in arabic_separators:
                     arabic_phrase = arabic_phrase.replace(sep, '')
+                if arabic_phrase == '':
+                    continue
                 last_arabic_token = arabic_phrase.split()[-1]
                 last_arabic_token_count = sum([1 for token in arabic_phrase.split() if token == last_arabic_token])
                 arabic_word_matches = [(w_idx, w) for w_idx, w in enumerate(arabic_words) if w['Word'] == last_arabic_token and w_idx > prev_token_idx_end]
