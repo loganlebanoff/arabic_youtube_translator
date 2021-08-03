@@ -1,7 +1,11 @@
 import time
 import glob
 import azure.cognitiveservices.speech as speechsdk
-from keys import AZURE_KEY, AZURE_REGION
+import streamlit as st
+AZURE_KEY = st.secrets['AZURE_KEY']
+AZURE_TRANSLATION_KEY = st.secrets['AZURE_TRANSLATION_KEY']
+
+AZURE_REGION = st.secrets['AZURE_REGION']
 
 
 def main():
@@ -12,21 +16,20 @@ def main():
 
     # Specify the path to an audio file containing speech (mono WAV / PCM with a sampling rate of 16
     # kHz).
-    weatherfilename = "learn.wav"
+    weatherfilename = "data/9EzXFgSebKs/clip_00000.wav"
 
 
-    translation_config = speechsdk.translation.SpeechTranslationConfig(subscription=speech_key,
+    speech_config = speechsdk.SpeechConfig(subscription=speech_key,
                                            region=service_region,
                                            speech_recognition_language='ar-EG',
-                                           target_languages=['en-US']
     )
-    translation_config.request_word_level_timestamps()
-    translation_config.output_format = speechsdk.OutputFormat(1)
+    speech_config.request_word_level_timestamps()
+    speech_config.output_format = speechsdk.OutputFormat(1)
 
-    def translate(file):
+    def recognize(file):
         audio_config = speechsdk.AudioConfig(filename=file)
-        recognizer = speechsdk.translation.TranslationRecognizer(
-            translation_config=translation_config, audio_config=audio_config)
+        recognizer = speechsdk.SpeechRecognizer(
+            speech_config=speech_config, audio_config=audio_config)
 
         # Starts translation, and returns after a single utterance is recognized. The end of a
         # single utterance is determined by listening for silence at the end or until a maximum of 15
@@ -38,9 +41,8 @@ def main():
 
         # Check the result
         if result.reason == speechsdk.ResultReason.TranslatedSpeech:
-            print("""Recognized: {}
-            English translation: {}""".format(
-                result.text, result.translations['en']))
+            print("""Recognized: {}""".format(
+                result.text))
             a=0
         elif result.reason == speechsdk.ResultReason.RecognizedSpeech:
             print("Recognized: {}".format(result.text))
@@ -52,6 +54,41 @@ def main():
                 print("Error details: {}".format(result.cancellation_details.error_details))
         a=0
     # </TranslationOnceWithFile>
+    recognize(weatherfilename)
+
+    def translate():
+        import os, requests, uuid, json
+
+        subscription_key = AZURE_TRANSLATION_KEY
+        endpoint = 'https://api.cognitive.microsofttranslator.com'
+
+        # If you encounter any issues with the base_url or path, make sure
+        # that you are using the latest endpoint: https://docs.microsoft.com/azure/cognitive-services/translator/reference/v3-0-translate
+        path = '/translate?api-version=3.0'
+        params = '&from=ar-EG&to=en&includeAlignment=true'
+        constructed_url = endpoint + path + params
+
+        headers = {
+            'Ocp-Apim-Subscription-Key': subscription_key,
+            'Ocp-Apim-Subscription-Region': 'eastus',
+            'Content-type': 'application/json',
+            'X-ClientTraceId': str(uuid.uuid4()),
+        }
+
+        # You can pass more than one object in body.
+        body = [{
+            'text': """
+            مساء النور. كنا عايزين نسألك إيه أكتر حاجة بحبها في القاهرة، القاهرة لو فضلنا نقول على الحاجات الحلوة إللي فيها بجد مش مش هنقدر اييه إنو فيها أو نديها حقها ايه بس من الحاجات دي بحبها جدا في القاهرة برج الجزيرة امم كتير القاهرة في أماكن أماكن فعلا مش هنقدر نلاقيها في أي بلد تانية والله مش عشان هي بس هي دي الحقيقة طب إيه أكتر حاجة تضايق منها خير؟
+
+            """.strip(),
+        }]
+        request = requests.post(constructed_url, headers=headers, json=body)
+        response = request.json()
+
+        print(json.dumps(response, sort_keys=True, indent=4, separators=(',', ': ')))
+        a=0
+    translate()
+    a=0
 
 
     # def speech_recognize_continuous_from_file():

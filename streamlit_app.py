@@ -10,7 +10,7 @@ import shutil
 #from keys import AZURE_KEY, AZURE_REGION
 
 AZURE_KEY = st.secrets['AZURE_KEY']
-
+AZURE_TRANSLATION_KEY = st.secrets['AZURE_TRANSLATION_KEY']
 AZURE_REGION = st.secrets['AZURE_REGION']
 
 import wave
@@ -24,7 +24,7 @@ def get_video_length(filename):
     return duration
 
 
-def load_translation_config():
+def load_speech_config():
     # Set up the subscription info for the Speech Service:
     # Replace with your own subscription key and service region (e.g., "westus").
     speech_key, service_region = AZURE_KEY, AZURE_REGION
@@ -33,19 +33,18 @@ def load_translation_config():
     # kHz).
 
 
-    translation_config = speechsdk.translation.SpeechTranslationConfig(subscription=speech_key,
+    speech_config = speechsdk.speech.SpeechConfig(subscription=speech_key,
                                            region=service_region,
                                            speech_recognition_language='ar-EG',
-                                           target_languages=['en-US']
     )
-    translation_config.request_word_level_timestamps()
-    translation_config.output_format = speechsdk.OutputFormat(1)
-    return translation_config
+    speech_config.request_word_level_timestamps()
+    speech_config.output_format = speechsdk.OutputFormat(1)
+    return speech_config
 
-def translate(translation_config, file):
+def recognize(speech_config, file):
     audio_config = speechsdk.AudioConfig(filename=file)
-    recognizer = speechsdk.translation.TranslationRecognizer(
-        translation_config=translation_config, audio_config=audio_config)
+    recognizer = speechsdk.SpeechRecognizer(
+        speech_config=speech_config, audio_config=audio_config)
 
     # Starts translation, and returns after a single utterance is recognized. The end of a
     # single utterance is determined by listening for silence at the end or until a maximum of 15
@@ -56,14 +55,9 @@ def translate(translation_config, file):
     result = recognizer.recognize_once()
 
     # Check the result
-    if result.reason == speechsdk.ResultReason.TranslatedSpeech:
-        print("""Recognized: {}
-        English translation: {}""".format(
-            result.text, result.translations['en']))
-        a=0
-        return result.translations['en'], json.loads(result.json)['Words']
-    elif result.reason == speechsdk.ResultReason.RecognizedSpeech:
+    if result.reason == speechsdk.ResultReason.RecognizedSpeech:
         print("Recognized: {}".format(result.text))
+        return result.text, json.loads(result.json)
     elif result.reason == speechsdk.ResultReason.NoMatch:
         print("No speech could be recognized: {}".format(result.no_match_details))
     elif result.reason == speechsdk.ResultReason.Canceled:
@@ -72,6 +66,36 @@ def translate(translation_config, file):
             print("Error details: {}".format(result.cancellation_details.error_details))
     return None, None
     a=0
+
+def translate(recognition):
+    import os, requests, uuid, json
+
+    subscription_key = AZURE_TRANSLATION_KEY
+    endpoint = 'https://api.cognitive.microsofttranslator.com'
+
+    # If you encounter any issues with the base_url or path, make sure
+    # that you are using the latest endpoint: https://docs.microsoft.com/azure/cognitive-services/translator/reference/v3-0-translate
+    path = '/translate?api-version=3.0'
+    params = '&from=ar-EG&to=en&includeAlignment=true'
+    constructed_url = endpoint + path + params
+
+    headers = {
+        'Ocp-Apim-Subscription-Key': subscription_key,
+        'Ocp-Apim-Subscription-Region': 'eastus',
+        'Content-type': 'application/json',
+        'X-ClientTraceId': str(uuid.uuid4()),
+    }
+
+    # You can pass more than one object in body.
+    body = [{
+        'text': recognition,
+    }]
+    request = requests.post(constructed_url, headers=headers, json=body)
+    response = request.json()
+    if 'error' in response or len(response) == 0 or len(response[0]['translations']) == 0:
+        return None, None
+    result = response[0]['translations'][0]
+    return result['text'], result['alignment']['proj']
 
 def download_video(url, filename):
     if os.path.exists(filename):
@@ -122,7 +146,7 @@ def get_boundaries(filename):
         return boundaries
 
 
-def process_video(translation_config, youtube_id, boundaries):
+def process_video(speech_config, youtube_id, boundaries):
     processed_file = os.path.join('data', youtube_id, 'processed.json')
     if os.path.exists(processed_file):
         return json.load(open(processed_file, encoding='utf8'))
@@ -134,10 +158,23 @@ def process_video(translation_config, youtube_id, boundaries):
             newAudio = audio_segment[start*1000:end*1000]
             clip_file = os.path.join('data', youtube_id, 'clip_%05d.wav' % clip_idx)
             newAudio.export(clip_file, format="wav")  # Exports to a wav file in the current path.
-            translation, timestamps = translate(translation_config, clip_file)
-            start_end_translation_list.append((start, end, translation, timestamps))
+            recognition, recognition_info = recognize(speech_config, clip_file)
+            translation, alignment = translate(recognition)
+            if translation is None:
+                continue
+            start_end_translation_list.append((start, end, translation, alignment, recognition, recognition_info))
         json.dump(start_end_translation_list, open(processed_file, 'w', encoding='utf8'))
         return start_end_translation_list
+
+def parse_alignment(alignment_text):
+    range_texts = alignment_text.strip().replace('-', ':').split()
+    range_texts = [range_text.split(':') for range_text in range_texts]
+    ranges = [(int(range_text[0]), int(range_text[1])+1, int(range_text[2]), int(range_text[3])+1) for range_text in range_texts]
+    return ranges
+
+def get_ranges_in_range(arrange_enrange, start, end):
+    valid_ranges = [r for r in arrange_enrange if r[2] >= start and r[3] < end]
+    return valid_ranges
 
 def postprocess(start_end_translation_list, youtube_id):
     postprocessed_file = os.path.join('data', youtube_id, 'postprocessed.json')
@@ -145,30 +182,61 @@ def postprocess(start_end_translation_list, youtube_id):
         return json.load(open(postprocessed_file, encoding='utf8'))
     else:
         postprocessed = []
-        for start, end, translation, timestamps in start_end_translation_list:
-            tokens = translation.strip().split()
-            collected_tokens = []
-            for token_idx, token in enumerate(tokens):
-                if token == timestamps[token_idx]:
-                    collected_tokens.append(token)
-                elif token in timestamps[token_idx]:
-                    collected_tokens.append(token)
-                    postprocessed.append(start, end, ' '.join(collected_tokens))
+        for start, end, translation, alignment, recognition, recognition_info in start_end_translation_list:
+            arrange_enrange = parse_alignment(alignment)
+            arabic_words = recognition_info['NBest'][0]['Words']
+            arabic_text = recognition
+            separators = [',', '.', '?']
+            arabic_separators = ['،', '.', '؟']
+            separator_indices = [i for i, c in enumerate(translation) if c in separators] + [len(translation)]
+
+            prev_phrase_end_arabic = 0
+            prev_phrase_end_english = 0
+            prev_token_idx_end = -1
+            prev_end_timestamp = start
+            for phrase_idx, separator_idx in enumerate(separator_indices):
+                english_phrase = translation[prev_phrase_end_english: separator_idx+1].strip()
+                if english_phrase == '':
+                    continue
+                ranges = get_ranges_in_range(arrange_enrange, prev_phrase_end_arabic, separator_idx+2)
+                max_range = max(ranges, key=lambda x: x[1])
+                phrase_end = max_range[1]
+                arabic_phrase = arabic_text[prev_phrase_end_arabic: phrase_end].strip()
+                for sep in arabic_separators:
+                    arabic_phrase = arabic_phrase.replace(sep, '')
+                last_arabic_token = arabic_phrase.split()[-1]
+                last_arabic_token_count = sum([1 for token in arabic_phrase.split() if token == last_arabic_token])
+                arabic_word_matches = [(w_idx, w) for w_idx, w in enumerate(arabic_words) if w['Word'] == last_arabic_token and w_idx > prev_token_idx_end]
+                if last_arabic_token_count > len(arabic_word_matches):
+                    a=0
+                arabic_word = arabic_word_matches[last_arabic_token_count-1][1]
+                arabic_word_idx = arabic_word_matches[last_arabic_token_count-1][0]
+                end_timestamp = start + ((arabic_word['Offset'] + arabic_word['Duration']) / 10000000)
+                postprocessed.append((prev_end_timestamp, end_timestamp, english_phrase))
+                prev_phrase_end_english = separator_idx+1
+                prev_token_idx_end = arabic_word_idx
+                prev_phrase_end_arabic = phrase_end
+                prev_end_timestamp = end_timestamp
+                a=0
+            a=0
+        return postprocessed
 
 
 
 
 def sleep(seconds, transcript_empty):
-    interval = 0.1
-    while seconds >= interval:
-        if st.session_state.should_stop:
-            transcript_empty.markdown('## stop')
-            return
-        time.sleep(interval)
-        seconds -= interval
-    if st.session_state.should_stop:
-        transcript_empty.markdown('## stop')
-        return
+    # interval = 0.1
+    # if seconds < 0:
+    #     a=0
+    # while seconds >= interval:
+    #     if st.session_state.should_stop:
+    #         transcript_empty.markdown('## stop')
+    #         return
+    #     time.sleep(interval)
+    #     seconds -= interval
+    # if st.session_state.should_stop:
+    #     transcript_empty.markdown('## stop')
+    #     return
     time.sleep(seconds)
 
 
@@ -241,21 +309,23 @@ def main():
         # empty.video(url, start_time=start_time)
         empty.markdown(my_html, unsafe_allow_html=True)
 
-        translation_config = load_translation_config()
+        speech_config = load_speech_config()
         with st.spinner('Calculating boundaries'):
             boundaries = get_boundaries(filename)
         # print(boundaries)
         # print(len(boundaries))
         with st.spinner('Processing video'):
-            start_end_translation_list = process_video(translation_config, youtube_id, boundaries)
-        # postprocessed_start_end_translation_list = postprocess(start_end_translation_list, youtube_id)
+            start_end_translation_list = process_video(speech_config, youtube_id, boundaries)
+        print([x[:3] for x in start_end_translation_list])
+        postprocessed_start_end_translation_list = postprocess(start_end_translation_list, youtube_id)
+        print(postprocessed_start_end_translation_list)
         # for clip_idx, (start, end, translation) in enumerate(start_end_translation_list):
         #     print(start, end, translation)
 
         st.success('Captions created!')
 
         is_first_running = True
-        for clip_idx, (start, end, translation, timestamps) in enumerate(start_end_translation_list):
+        for clip_idx, (start, end, translation) in enumerate(postprocessed_start_end_translation_list):
             if end < start_secs:
                 continue
             if clip_idx == 0:
@@ -265,9 +335,9 @@ def main():
                     sleep(start - start_secs, transcript_empty)
             if is_first_running:
                 is_first_running = False
-                sleep(2.5, transcript_empty)
+                sleep(2, transcript_empty)
             else:
-                prev_end = start_end_translation_list[clip_idx-1][1]
+                prev_end = postprocessed_start_end_translation_list[clip_idx-1][1]
                 if start_secs > prev_end:
                     sleep(start - start_secs, transcript_empty)
                 else:
