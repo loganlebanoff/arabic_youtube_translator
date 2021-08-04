@@ -155,6 +155,13 @@ def get_boundaries(filename):
         return boundaries
 
 
+def split_clips(audio_segment, clip_file, start, end):
+    if not os.path.exists(clip_file):
+        newAudio = audio_segment[start*1000:end*1000]
+        newAudio.export(clip_file, format="wav")  # Exports to a wav file in the current path.
+
+
+
 def process_video(speech_config, youtube_id, boundaries):
     processed_file = os.path.join('data', youtube_id, 'processed.json')
     if os.path.exists(processed_file):
@@ -168,12 +175,13 @@ def process_video(speech_config, youtube_id, boundaries):
         ends = []
         for clip_idx, start, end in zip(range(len(boundaries) // 2), boundaries[::2], boundaries[1::2]):
             clip_file = os.path.join('data', youtube_id, 'clip_%05d.wav' % clip_idx)
-            if not os.path.exists(clip_file):
-                newAudio = audio_segment[start*1000:end*1000]
-                newAudio.export(clip_file, format="wav")  # Exports to a wav file in the current path.
             clip_files.append(clip_file)
             starts.append(start)
             ends.append(end)
+
+        # We can use a with statement to ensure threads are cleaned up promptly
+        with concurrent.futures.ThreadPoolExecutor(max_workers=20) as executor:
+            executor.map(split_clips, repeat(audio_segment), clip_files, starts, ends)
 
         # We can use a with statement to ensure threads are cleaned up promptly
         with concurrent.futures.ThreadPoolExecutor(max_workers=20) as executor:
