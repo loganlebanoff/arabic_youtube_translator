@@ -324,7 +324,7 @@ def main():
         start_time = st.slider('Time', time_0, time_1, step=datetime.timedelta(seconds=1), format='HH:mm:ss')
 
         start_secs = int((start_time-time_0).total_seconds())
-        embed_url = url.replace('watch?v=', 'embed/') + '?&autoplay=1&start=' + str(start_secs)
+        embed_url = url.replace('watch?v=', 'embed/') + '?&autoplay=1&mute=1&start=' + str(start_secs)
 
         my_html = '''<style>
 .video-background { 
