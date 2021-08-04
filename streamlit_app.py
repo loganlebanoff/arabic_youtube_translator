@@ -17,12 +17,10 @@ AZURE_REGION = st.secrets['AZURE_REGION']
 
 import wave
 import contextlib
+import librosa
 
 def get_video_length(filename):
-    with contextlib.closing(wave.open(filename, 'r')) as f:
-        frames = f.getnframes()
-        rate = f.getframerate()
-        duration = frames / float(rate)
+    duration = librosa.get_duration(filename=filename)
     return duration
 
 
@@ -348,8 +346,6 @@ def main():
 </div>
         '''.replace('<video>', embed_url)
 
-        st.button('Delete cache for this video', on_click=delete_cache, args=[youtube_id])
-
 
         # empty.video(url, start_time=start_time)
         empty.markdown(my_html, unsafe_allow_html=True)
@@ -394,6 +390,8 @@ def main():
                 sleep(end - start_secs, transcript_empty)
             else:
                 sleep(end - start, transcript_empty)
+
+        st.button('Delete cache for this video', on_click=delete_cache, args=[youtube_id])
 
 
 if __name__ == '__main__':
