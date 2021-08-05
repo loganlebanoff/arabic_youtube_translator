@@ -17,10 +17,23 @@ AZURE_REGION = st.secrets['AZURE_REGION']
 
 import wave
 import contextlib
-import librosa
+import subprocess
 
 def get_video_length(filename):
-    duration = librosa.get_duration(filename=filename)
+    try:
+        with contextlib.closing(wave.open(filename, 'r')) as f:
+            frames = f.getnframes()
+            rate = f.getframerate()
+            duration = frames / float(rate)
+    except:
+        mp3_filename = filename.replace('.wav', '.mp3')
+        os.rename(filename, mp3_filename)
+        subprocess.call(['ffmpeg', '-i', mp3_filename, '-acodec', 'pcm_s16le', '-ac', '1', '-ar', '16000', '-vn', filename])
+
+        with contextlib.closing(wave.open(filename, 'r')) as f:
+            frames = f.getnframes()
+            rate = f.getframerate()
+            duration = frames / float(rate)
     return duration
 
 
@@ -251,9 +264,18 @@ def postprocess(start_end_translation_list, youtube_id):
                 last_arabic_token_count = sum([1 for token in arabic_phrase.split() if token == last_arabic_token])
                 arabic_word_matches = [(w_idx, w) for w_idx, w in enumerate(arabic_words) if w['Word'] == last_arabic_token and w_idx > prev_token_idx_end]
                 if last_arabic_token_count > len(arabic_word_matches):
+                    non_matches = [(w_idx, w) for w_idx, w in enumerate(arabic_words) if w['Word'] not in arabic_phrase.split() and w_idx > prev_token_idx_end]
+                    if len(non_matches) == 0:
+                        print(arabic_text)
+                        print(translation)
+                        print(english_phrase)
+                        print(arrange_enrange)
+                    arabic_word = non_matches[0][1]
+                    arabic_word_idx = non_matches[0][0]
                     a=0
-                arabic_word = arabic_word_matches[last_arabic_token_count-1][1]
-                arabic_word_idx = arabic_word_matches[last_arabic_token_count-1][0]
+                else:
+                    arabic_word = arabic_word_matches[last_arabic_token_count-1][1]
+                    arabic_word_idx = arabic_word_matches[last_arabic_token_count-1][0]
                 end_timestamp = start + ((arabic_word['Offset'] + arabic_word['Duration']) / 10000000)
                 postprocessed.append((prev_end_timestamp, end_timestamp, english_phrase))
                 prev_phrase_end_english = separator_idx+1
@@ -322,7 +344,7 @@ def main():
         start_time = st.slider('Time', time_0, time_1, step=datetime.timedelta(seconds=1), format='HH:mm:ss')
 
         start_secs = int((start_time-time_0).total_seconds())
-        embed_url = url.replace('watch?v=', 'embed/') + '?&autoplay=1&mute=1&start=' + str(start_secs)
+        embed_url = url.replace('watch?v=', 'embed/') + '?&autoplay=1&start=' + str(start_secs)
 
         my_html = '''<style>
 .video-background { 
