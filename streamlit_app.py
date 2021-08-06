@@ -191,11 +191,11 @@ def process_video(speech_config, youtube_id, boundaries):
             ends.append(end)
 
         # We can use a with statement to ensure threads are cleaned up promptly
-        with concurrent.futures.ThreadPoolExecutor(max_workers=20) as executor:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=8) as executor:
             executor.map(split_clips, repeat(audio_segment), clip_files, starts, ends)
 
         # We can use a with statement to ensure threads are cleaned up promptly
-        with concurrent.futures.ThreadPoolExecutor(max_workers=20) as executor:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=8) as executor:
             results = list(executor.map(recognize_and_translate, repeat(speech_config), clip_files, starts, ends))
         for result in results:
             recognition, recognition_info, translation, alignment, start, end = result
@@ -289,16 +289,17 @@ def postprocess(start_end_translation_list, youtube_id):
 
 
 
-def sleep(seconds, transcript_empty):
-    # interval = 0.1
-    # if seconds < 0:
-    #     a=0
-    # while seconds >= interval:
-    #     if st.session_state.should_stop:
-    #         transcript_empty.markdown('## stop')
-    #         return
-    #     time.sleep(interval)
-    #     seconds -= interval
+def sleep(seconds, transcript_empty, prev_translation):
+    interval = 1
+    if seconds < 0:
+        a=0
+    while seconds >= interval:
+        # if st.session_state.should_stop:
+        #     transcript_empty.markdown('## stop')
+        #     return
+        time.sleep(interval - 0.02)
+        seconds -= interval
+        transcript_empty.markdown('## ' + prev_translation)
     # if st.session_state.should_stop:
     #     transcript_empty.markdown('## stop')
     #     return
@@ -313,18 +314,29 @@ def delete_cache(youtube_id):
     shutil.rmtree(os.path.join('data', youtube_id))
     st.success('Cache deleted')
 
+def clear_url_textbox():
+    st.session_state.run_id = str(int(st.session_state.run_id) + 1)
 
 def main():
     st.session_state.should_stop = False
     if not os.path.exists('data'):
         os.makedirs('data')
 
-    url_empty = st.empty()
-    url_radio = st.radio("Use example video", ['No', 'Yes'])
-    initial_url = '' if url_radio == 'No' else 'https://www.youtube.com/watch?v=2VKy2VibTX0'
+    st.title('Arabic YouTube Translator')
 
-
-    url = url_empty.text_input('YouTube URL:', value=initial_url, key='youtube_url_input')
+    url_choices = [
+        '',
+        'https://www.youtube.com/watch?v=2VKy2VibTX0',
+        'https://www.youtube.com/watch?v=9EzXFgSebKs',
+        'https://www.youtube.com/watch?v=IPKe2pnzErs',
+        'https://www.youtube.com/watch?v=sCEgL5bjBVM',
+        'https://www.youtube.com/watch?v=AdyniMGoIjg',
+    ]
+    if 'run_id' not in st.session_state:
+        st.session_state.run_id = '0'
+    url_dropdown = st.selectbox('Select a YouTube URL:', url_choices, key=st.session_state.run_id)
+    url_textbox = st.text_input('OR Copy and paste a URL here:', value='', on_change=clear_url_textbox)
+    url = url_dropdown.strip() if url_dropdown != '' else url_textbox.strip()
 
     print(url)
     if url != '':
@@ -388,30 +400,32 @@ def main():
         st.success('Captions created!')
 
         is_first_running = True
+        prev_translation = ''
         for clip_idx, (start, end, translation) in enumerate(postprocessed_start_end_translation_list):
             if end < start_secs:
                 continue
             if clip_idx == 0:
                 if start_secs == 0:
-                    sleep(start, transcript_empty)
+                    sleep(start, transcript_empty, prev_translation)
                 elif start > start_secs:
-                    sleep(start - start_secs, transcript_empty)
+                    sleep(start - start_secs, transcript_empty, prev_translation)
             if is_first_running:
                 is_first_running = False
-                sleep(2, transcript_empty)
+                sleep(2, transcript_empty, prev_translation)
             else:
                 prev_end = postprocessed_start_end_translation_list[clip_idx-1][1]
                 if start_secs > prev_end:
-                    sleep(start - start_secs, transcript_empty)
+                    sleep(start - start_secs, transcript_empty, prev_translation)
                 else:
-                    sleep(start - prev_end, transcript_empty)
+                    sleep(start - prev_end, transcript_empty, prev_translation)
             if translation is None:
                 translation = '.'
+            prev_translation = translation
             transcript_empty.markdown('## ' + translation)
             if start_secs > start:
-                sleep(end - start_secs, transcript_empty)
+                sleep(end - start_secs, transcript_empty, prev_translation)
             else:
-                sleep(end - start, transcript_empty)
+                sleep(end - start, transcript_empty, prev_translation)
 
         st.button('Delete cache for this video', on_click=delete_cache, args=[youtube_id])
 
