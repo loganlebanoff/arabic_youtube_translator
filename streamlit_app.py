@@ -191,11 +191,11 @@ def process_video(speech_config, youtube_id, boundaries):
             ends.append(end)
 
         # We can use a with statement to ensure threads are cleaned up promptly
-        with concurrent.futures.ThreadPoolExecutor(max_workers=8) as executor:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
             executor.map(split_clips, repeat(audio_segment), clip_files, starts, ends)
 
         # We can use a with statement to ensure threads are cleaned up promptly
-        with concurrent.futures.ThreadPoolExecutor(max_workers=8) as executor:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
             results = list(executor.map(recognize_and_translate, repeat(speech_config), clip_files, starts, ends))
         for result in results:
             recognition, recognition_info, translation, alignment, start, end = result
@@ -341,6 +341,7 @@ def main():
     print(url)
     if url != '':
         youtube_id = url.split('?v=')[-1]
+        st.sidebar.button('Delete cache for this video', on_click=delete_cache, args=[youtube_id])
         filename = os.path.join('data', youtube_id, 'full.wav')
         with st.spinner('Downloading video'):
             download_video(url, filename)
@@ -426,8 +427,6 @@ def main():
                 sleep(end - start_secs, transcript_empty, prev_translation)
             else:
                 sleep(end - start, transcript_empty, prev_translation)
-
-        st.button('Delete cache for this video', on_click=delete_cache, args=[youtube_id])
 
 
 if __name__ == '__main__':
