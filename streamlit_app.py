@@ -191,11 +191,11 @@ def process_video(speech_config, youtube_id, boundaries):
             ends.append(end)
 
         # We can use a with statement to ensure threads are cleaned up promptly
-        with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
             executor.map(split_clips, repeat(audio_segment), clip_files, starts, ends)
 
         # We can use a with statement to ensure threads are cleaned up promptly
-        with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
             results = list(executor.map(recognize_and_translate, repeat(speech_config), clip_files, starts, ends))
         for result in results:
             recognition, recognition_info, translation, alignment, start, end = result
