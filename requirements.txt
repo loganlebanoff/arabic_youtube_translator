@@ -4,7 +4,6 @@ https://github.com/pyannote/pyannote-audio/archive/develop.zip
 pafy
 tqdm
 python-dateutil
-azure
 youtube-dl
 azure-cognitiveservices-speech
 pydub
