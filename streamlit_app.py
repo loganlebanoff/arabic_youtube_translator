@@ -140,6 +140,7 @@ def download_video(url, filename):
     }
 
     with youtube_dl.YoutubeDL(ydl_opts) as ydl:
+        ydl.cache.remove()
         ydl.download([url])
     # exit()
 
