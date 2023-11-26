@@ -1,3 +1,5 @@
+from typing import Tuple, List
+
 import streamlit as st
 import pafy
 import datetime
@@ -149,6 +151,7 @@ def download_video(url, filename):
     }
 
     with youtube_dl.YoutubeDL(ydl_opts) as ydl:
+        ydl.cache.remove()
         ydl.download([url])
     # exit()
 
@@ -184,7 +187,7 @@ def split_clips(audio_segment, clip_file, start, end):
 
 
 
-def process_video(speech_config, youtube_id, boundaries):
+def process_video(speech_config, youtube_id, boundaries) -> List[Tuple[int, int, str, dict, str, dict]]:
     processed_file = os.path.join('data', youtube_id, 'processed.json')
     if os.path.exists(processed_file):
         return json.load(open(processed_file, encoding='utf8'))
@@ -233,7 +236,7 @@ def is_inside_ranges(arrange_enrange, separator_idx):
             return True
     return False
 
-def postprocess(start_end_translation_list, youtube_id):
+def postprocess(start_end_translation_list, youtube_id) -> List[Tuple[int, int, str]]:
     postprocessed_file = os.path.join('data', youtube_id, 'postprocessed.json')
     if os.path.exists(postprocessed_file):
         return json.load(open(postprocessed_file, encoding='utf8'))
