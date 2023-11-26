@@ -1,10 +1,9 @@
 numpy
 cffi
-https://github.com/pyannote/pyannote-audio/archive/develop.zip
+pyannote.audio==0.0.1
 pafy
 tqdm
 python-dateutil
-azure
-youtube-dl
+git+https://github.com/ytdl-org/youtube-dl.git
 azure-cognitiveservices-speech
 pydub
