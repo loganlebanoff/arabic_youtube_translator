@@ -11,6 +11,8 @@ import json
 import shutil
 from itertools import repeat
 import concurrent
+from dataclasses_json import dataclass_json
+import pickle
 #from keys import AZURE_KEY, AZURE_REGION
 
 # import subprocess
@@ -27,6 +29,39 @@ AZURE_REGION = st.secrets['AZURE_REGION']
 import wave
 import contextlib
 import subprocess
+from dataclasses import dataclass
+
+@dataclass_json
+@dataclass
+class TimestampedWord(json.JSONEncoder):
+    word: str
+    start: float
+    end: float
+
+@dataclass_json
+@dataclass
+class WordAlignment(json.JSONEncoder):
+    original: str
+    translation: str
+    original_start: int
+    original_end: int
+    translation_start: int
+    translation_end: int
+
+
+class CustomEncoder(json.JSONEncoder):
+    def default(self, obj):
+        if isinstance(obj, (TimestampedWord, WordAlignment)):
+            return obj.__dict__  # Convert the object to a dictionary.
+        return json.JSONEncoder.default(self, obj)
+
+
+def is_inside_ranges(translation_alignment: List[WordAlignment], separator_idx: int):
+    for alignment in translation_alignment:
+        if separator_idx >= alignment.translation_start and separator_idx < alignment.translation_end - 1:
+            return True
+    return False
+
 
 def get_video_length(filename):
     try:
@@ -64,7 +99,7 @@ def load_speech_config():
     speech_config.output_format = speechsdk.OutputFormat(1)
     return speech_config
 
-def recognize(speech_config, file):
+def recognize(speech_config, file) -> Tuple[str, List[TimestampedWord]]:
     audio_config = speechsdk.AudioConfig(filename=file)
     recognizer = speechsdk.SpeechRecognizer(
         speech_config=speech_config, audio_config=audio_config)
@@ -81,7 +116,13 @@ def recognize(speech_config, file):
     # Check the result
     if result.reason == speechsdk.ResultReason.RecognizedSpeech:
         print("Recognized: {}".format(result.text))
-        return result.text, json.loads(result.json)
+        result_json = json.loads(result.json)
+        timestamped_words = []
+        for word in result_json['NBest'][0]['Words']:
+            start = word['Offset'] / 10000000
+            end = start + word['Duration'] / 10000000
+            timestamped_words.append(TimestampedWord(word['Word'], start, end))
+        return result.text, timestamped_words
     elif result.reason == speechsdk.ResultReason.NoMatch:
         print("No speech could be recognized: {}".format(result.no_match_details))
     elif result.reason == speechsdk.ResultReason.Canceled:
@@ -91,7 +132,29 @@ def recognize(speech_config, file):
     return None, None
     a=0
 
-def translate(recognition):
+def parse_alignment(original: str, translation: str, alignment_text: str) -> List[WordAlignment]:
+    """
+    Parse the alignment text from Azure Speech to Text API into a list of WordAlignment objects.
+
+    :param original: The original text
+    :param translation: The translated text
+    :param alignment_text: The alignment text from Azure Speech to Text API
+        Example: "0:10-0:12 11:15-13:17"
+    :return: A list of WordAlignment objects
+    """
+    range_texts = alignment_text.strip().replace('-', ':').split()
+    range_texts = [range_text.split(':') for range_text in range_texts]
+    alignment = []
+    for range_text in range_texts:
+        original_start, original_end, translation_start, translation_end = [int(x) for x in range_text]
+        original_end += 1
+        translation_end += 1
+        original_word = original[original_start:original_end]
+        translation_word = translation[translation_start:translation_end]
+        alignment.append(WordAlignment(original_word, translation_word, original_start, original_end, translation_start, translation_end))
+    return alignment
+
+def translate(recognition: str) -> Tuple[str, List[WordAlignment]]:
     import os, requests, uuid, json
 
     subscription_key = AZURE_TRANSLATION_KEY
@@ -121,12 +184,14 @@ def translate(recognition):
         return None, None
     result = response[0]['translations'][0]
     print("Translation: {}".format(result['text']))
-    return result['text'], result['alignment']['proj']
 
-def recognize_and_translate(speech_config, file, start, end):
-    recognition, recognition_info = recognize(speech_config, file)
+    alignment = parse_alignment(recognition, result['text'], result['alignment']['proj'])
+    return result['text'], alignment
+
+def recognize_and_translate(speech_config, file, start, end) -> Tuple[str, List[TimestampedWord], str, List[WordAlignment], float, float]:
+    recognition, timestamped_words = recognize(speech_config, file)
     translation, alignment = translate(recognition)
-    return recognition, recognition_info, translation, alignment, start, end
+    return recognition, timestamped_words, translation, alignment, start, end
 
 def download_video(url, filename):
     if os.path.exists(filename):
@@ -186,11 +251,10 @@ def split_clips(audio_segment, clip_file, start, end):
         newAudio.export(clip_file, format="wav")  # Exports to a wav file in the current path.
 
 
-
-def process_video(speech_config, youtube_id, boundaries) -> List[Tuple[int, int, str, dict, str, dict]]:
-    processed_file = os.path.join('data', youtube_id, 'processed.json')
+def process_video(speech_config, youtube_id, boundaries) -> List[Tuple[int, int, List[WordAlignment], List[TimestampedWord], str]]:
+    processed_file = os.path.join('data', youtube_id, 'processed.pkl')
     if os.path.exists(processed_file):
-        return json.load(open(processed_file, encoding='utf8'))
+        return pickle.load(open(processed_file, 'rb'))
     else:
         from pydub import AudioSegment
         audio_segment = AudioSegment.from_wav(os.path.join('data', youtube_id, 'full.wav'))
@@ -213,28 +277,16 @@ def process_video(speech_config, youtube_id, boundaries) -> List[Tuple[int, int,
         with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
             results = list(executor.map(recognize_and_translate, repeat(speech_config), clip_files, starts, ends))
         for result in results:
-            recognition, recognition_info, translation, alignment, start, end = result
+            recognition, timestamped_words, translation, alignment, start, end = result
             if translation is None:
                 continue
-            start_end_translation_list.append((start, end, translation, alignment, recognition, recognition_info))
-        json.dump(start_end_translation_list, open(processed_file, 'w', encoding='utf8'))
+            start_end_translation_list.append((start, end, translation, alignment, timestamped_words, recognition))
+        pickle.dump(start_end_translation_list, open(processed_file, 'wb'))
         return start_end_translation_list
 
-def parse_alignment(alignment_text):
-    range_texts = alignment_text.strip().replace('-', ':').split()
-    range_texts = [range_text.split(':') for range_text in range_texts]
-    ranges = [(int(range_text[0]), int(range_text[1])+1, int(range_text[2]), int(range_text[3])+1) for range_text in range_texts]
-    return ranges
-
-def get_ranges_in_range(arrange_enrange, start, end):
-    valid_ranges = [r for r in arrange_enrange if r[2] >= start and r[3] < end]
+def get_ranges_in_range(translation_alignment: List[WordAlignment], start, end):
+    valid_ranges = [r for r in translation_alignment if r.translation_start >= start and r.translation_end < end]
     return valid_ranges
-
-def is_inside_ranges(arrange_enrange, separator_idx):
-    for range in arrange_enrange:
-        if separator_idx >= range[2] and separator_idx < range[3]-1:
-            return True
-    return False
 
 def postprocess(start_end_translation_list, youtube_id) -> List[Tuple[int, int, str]]:
     postprocessed_file = os.path.join('data', youtube_id, 'postprocessed.json')
@@ -242,13 +294,11 @@ def postprocess(start_end_translation_list, youtube_id) -> List[Tuple[int, int, 
         return json.load(open(postprocessed_file, encoding='utf8'))
     else:
         postprocessed = []
-        for start, end, translation, alignment, recognition, recognition_info in start_end_translation_list:
-            arrange_enrange = parse_alignment(alignment)
-            arabic_words = recognition_info['NBest'][0]['Words']
+        for start, end, translation, alignment, timestamped_words, recognition in start_end_translation_list:
             arabic_text = recognition
             separators = [',', '.', '?']
             arabic_separators = ['،', '.', '؟']
-            separator_indices = [i for i, c in enumerate(translation) if c in separators and not is_inside_ranges(arrange_enrange, i)] + [len(translation)]
+            separator_indices = [i for i, c in enumerate(translation) if c in separators and not is_inside_ranges(alignment, i)] + [len(translation)]
 
 
             prev_phrase_end_arabic = 0
@@ -265,11 +315,11 @@ def postprocess(start_end_translation_list, youtube_id) -> List[Tuple[int, int, 
                     next_english_phrase = translation[separator_idx+1: separator_indices[phrase_idx+1]+1].strip()
                     if len(next_english_phrase) < 15:
                         continue
-                ranges = get_ranges_in_range(arrange_enrange, prev_phrase_end_english-2, separator_idx+2)
+                ranges = get_ranges_in_range(alignment, prev_phrase_end_english-2, separator_idx+2)
                 if len(ranges) == 0:
                     continue
-                max_range = max(ranges, key=lambda x: x[1])
-                phrase_end = max_range[1]
+                max_range = max(ranges, key=lambda x: x.original_end)
+                phrase_end = max_range.original_end
                 arabic_phrase = arabic_text[prev_phrase_end_arabic: phrase_end].strip()
                 for sep in arabic_separators:
                     arabic_phrase = arabic_phrase.replace(sep, '')
@@ -277,21 +327,21 @@ def postprocess(start_end_translation_list, youtube_id) -> List[Tuple[int, int, 
                     continue
                 last_arabic_token = arabic_phrase.split()[-1]
                 last_arabic_token_count = sum([1 for token in arabic_phrase.split() if token == last_arabic_token])
-                arabic_word_matches = [(w_idx, w) for w_idx, w in enumerate(arabic_words) if w['Word'] == last_arabic_token and w_idx > prev_token_idx_end]
+                arabic_word_matches = [(w_idx, w) for w_idx, w in enumerate(timestamped_words) if w.word == last_arabic_token and w_idx > prev_token_idx_end]
                 if last_arabic_token_count > len(arabic_word_matches):
-                    non_matches = [(w_idx, w) for w_idx, w in enumerate(arabic_words) if w['Word'] not in arabic_phrase.split() and w_idx > prev_token_idx_end]
+                    non_matches = [(w_idx, w) for w_idx, w in enumerate(timestamped_words) if w.word not in arabic_phrase.split() and w_idx > prev_token_idx_end]
                     if len(non_matches) == 0:
                         print(arabic_text)
                         print(translation)
                         print(english_phrase)
-                        print(arrange_enrange)
+                        print(timestamped_words)
                     arabic_word = non_matches[0][1]
                     arabic_word_idx = non_matches[0][0]
                     a=0
                 else:
                     arabic_word = arabic_word_matches[last_arabic_token_count-1][1]
                     arabic_word_idx = arabic_word_matches[last_arabic_token_count-1][0]
-                end_timestamp = start + ((arabic_word['Offset'] + arabic_word['Duration']) / 10000000)
+                end_timestamp = start + arabic_word.end
                 postprocessed.append((prev_end_timestamp, end_timestamp, english_phrase))
                 prev_phrase_end_english = separator_idx+1
                 prev_token_idx_end = arabic_word_idx
