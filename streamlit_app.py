@@ -14,6 +14,7 @@ from util import (
     WhisperASR,
     AzureASR,
     AzureTranslator,
+    GPTTranslator,
     Processor,
 )
 
@@ -24,7 +25,8 @@ def load_model():
     asr = AzureASR()
 
     print("Loading Translator model")
-    translator = AzureTranslator()
+    # translator = AzureTranslator()
+    translator = GPTTranslator()
 
     processor = Processor(asr, translator)
     return processor

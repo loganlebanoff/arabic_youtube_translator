@@ -25,6 +25,7 @@ from util import (
     WhisperASR,
     AzureASR,
     AzureTranslator,
+    GPTTranslator,
     Processor,
 )
 
@@ -32,13 +33,14 @@ def main():
     if not os.path.exists('data'):
         os.makedirs('data')
 
-    url = "https://www.youtube.com/watch?v=9EzXFgSebKs"
+    url = "https://www.youtube.com/watch?v=Lv5-7A6Ybq4"
 
     # asr = WhisperASR()
     asr = AzureASR()
 
     print("Loading Translator model")
-    translator = AzureTranslator()
+    # translator = AzureTranslator()
+    translator = GPTTranslator()
 
     processor = Processor(asr, translator)
 

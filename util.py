@@ -180,6 +180,53 @@ class AzureTranslator:
         alignment = parse_alignment(text, result['text'], result['alignment']['proj'])
         return result['text'], alignment
 
+class GPTTranslator:
+    def __init__(self) -> None:
+        import openai
+        openai.api_key_path = "openai_key.txt"
+    
+    def request_gpt4(self, messages: List[dict], temperature, max_tokens) -> str:
+        import openai
+        for i in range(60):
+            try:
+                response = openai.ChatCompletion.create(
+                    model="gpt-4",
+                    messages=messages,
+                    temperature=temperature,
+                    max_tokens=max_tokens,
+                )
+                output_text = response.choices[0]["message"]["content"]
+                return output_text
+            except KeyboardInterrupt:
+                print("Keyboard interrupt")
+                exit()
+            except Exception as e:
+                import traceback
+                import random
+                error_message = traceback.format_exc()
+                if "RateLimitError" in error_message:
+                    print("Rate limit error, retrying after a few seconds")
+                    time.sleep(random.randint(2, 10))
+                elif "InvalidRequestError" in error_message:
+                    raise e
+                else:
+                    print(error_message)
+                print("--------------------------------------------------")
+
+    def translate(self, text) -> Tuple[str, List[WordAlignment]]:
+        prompt = f"Translate this text to English.\n\n{text}"
+        messages = [
+            {"role": "user", "content": prompt},
+        ]
+        output_text = self.request_gpt4(messages, 0.0, 500)
+        print("Translation: {}".format(output_text))
+        if text is None:
+            import pdb; pdb.set_trace()
+        if output_text is None:
+            import pdb; pdb.set_trace()
+        alignment = [WordAlignment(text, output_text, 0, len(text), 0, len(output_text))]
+        return output_text, alignment
+
 class Processor:
 
     def __init__(self, asr, translator):
@@ -188,6 +235,8 @@ class Processor:
 
     def recognize_and_translate(self, file, start, end) -> Tuple[str, List[TimestampedWord], str, List[WordAlignment], float, float]:
         recognition, timestamped_words = self.asr.transcribe(file)
+        if recognition is None:
+            return None
         translation, alignment = self.translator.translate(recognition)
         return recognition, timestamped_words, translation, alignment, start, end
 
@@ -343,6 +392,7 @@ def process_video(processor, youtube_id, boundaries) -> List[Tuple[int, int, Lis
         # results = [processor.recognize_and_translate(clip_file, start, end) for clip_file, start, end in zip(clip_files, starts, ends)]
         with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
             results = list(executor.map(processor.recognize_and_translate, clip_files, starts, ends))
+        results = [r for r in results if r is not None]
         for result in results:
             recognition, timestamped_words, translation, alignment, start, end = result
             if translation is None:
