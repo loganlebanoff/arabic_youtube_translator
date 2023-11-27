@@ -26,7 +26,13 @@ from util import (
     get_boundaries,
     process_video,
     postprocess,
+    WhisperASR,
 )
+
+@st.cache(allow_output_mutation=True)
+def load_asr():
+    print("Loading ASR model")
+    return WhisperASR()
 
 
 def sleep(seconds, transcript_empty, prev_translation):
@@ -79,6 +85,7 @@ def main():
     url = url_dropdown.strip() if url_dropdown != '' else url_textbox.strip()
 
     print(url)
+    asr = load_asr()
     if url != '':
         youtube_id = url.split('?v=')[-1]
         st.sidebar.button('Delete cache for this video', on_click=delete_cache, args=[youtube_id])
@@ -131,7 +138,7 @@ def main():
         # print(boundaries)
         # print(len(boundaries))
         with st.spinner('Processing video'):
-            start_end_translation_list = process_video(speech_config, youtube_id, boundaries)
+            start_end_translation_list = process_video(speech_config, asr, youtube_id, boundaries)
         print([x[:3] for x in start_end_translation_list])
         postprocessed_start_end_translation_list = postprocess(start_end_translation_list, youtube_id)
         print(postprocessed_start_end_translation_list)

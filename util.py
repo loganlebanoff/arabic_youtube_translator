@@ -31,6 +31,8 @@ import contextlib
 import subprocess
 from dataclasses import dataclass
 
+import whisperx
+
 @dataclass_json
 @dataclass
 class TimestampedWord(json.JSONEncoder):
@@ -54,6 +56,36 @@ class CustomEncoder(json.JSONEncoder):
         if isinstance(obj, (TimestampedWord, WordAlignment)):
             return obj.__dict__  # Convert the object to a dictionary.
         return json.JSONEncoder.default(self, obj)
+
+
+
+class WhisperASR:
+    def __init__(self):
+        self.device = "cpu"
+        compute_type = "float32" # change to "int8" if low on GPU mem (may reduce accuracy)
+        self.batch_size = 16
+        self.model = whisperx.load_model("large-v2", self.device, compute_type=compute_type)
+        self.model_a, self.metadata = whisperx.load_align_model(language_code="ar", device=self.device)
+
+    def transcribe(self, audio_file) -> Tuple[str, List[TimestampedWord]]:
+        print('Recognition job started')
+        # 1. Transcribe with original whisper (batched)
+        audio = whisperx.load_audio(audio_file)
+        result = self.model.transcribe(audio, batch_size=self.batch_size, language="ar")
+        print(result["segments"])  # before alignment
+
+        # 2. Align whisper output
+        result = whisperx.align(result["segments"], self.model_a, self.metadata, audio, self.device, return_char_alignments=False)
+
+        print(result["segments"])  # after alignment
+
+        result_text = result["text"]
+        timestamped_words = []
+        for word in result["segments"]["words"]:
+            start = word['start']
+            end = word['end']
+            timestamped_words.append(TimestampedWord(word['word'], start, end))
+        return result_text, timestamped_words
 
 
 def is_inside_ranges(translation_alignment: List[WordAlignment], separator_idx: int):
@@ -99,38 +131,40 @@ def load_speech_config():
     speech_config.output_format = speechsdk.OutputFormat(1)
     return speech_config
 
-def recognize(speech_config, file) -> Tuple[str, List[TimestampedWord]]:
-    audio_config = speechsdk.AudioConfig(filename=file)
-    recognizer = speechsdk.SpeechRecognizer(
-        speech_config=speech_config, audio_config=audio_config)
+# def recognize(speech_config, file) -> Tuple[str, List[TimestampedWord]]:
+#     audio_config = speechsdk.AudioConfig(filename=file)
+#     recognizer = speechsdk.SpeechRecognizer(
+#         speech_config=speech_config, audio_config=audio_config)
 
-    # Starts translation, and returns after a single utterance is recognized. The end of a
-    # single utterance is determined by listening for silence at the end or until a maximum of 15
-    # seconds of audio is processed. The task returns the recognition text as result.
-    # Note: Since recognize_once() returns only a single utterance, it is suitable only for single
-    # shot recognition like command or query.
-    # For long-running multi-utterance recognition, use start_continuous_recognition() instead.
-    print('Recognition job started')
-    result = recognizer.recognize_once()
+#     # Starts translation, and returns after a single utterance is recognized. The end of a
+#     # single utterance is determined by listening for silence at the end or until a maximum of 15
+#     # seconds of audio is processed. The task returns the recognition text as result.
+#     # Note: Since recognize_once() returns only a single utterance, it is suitable only for single
+#     # shot recognition like command or query.
+#     # For long-running multi-utterance recognition, use start_continuous_recognition() instead.
+#     print('Recognition job started')
+#     result = recognizer.recognize_once()
 
-    # Check the result
-    if result.reason == speechsdk.ResultReason.RecognizedSpeech:
-        print("Recognized: {}".format(result.text))
-        result_json = json.loads(result.json)
-        timestamped_words = []
-        for word in result_json['NBest'][0]['Words']:
-            start = word['Offset'] / 10000000
-            end = start + word['Duration'] / 10000000
-            timestamped_words.append(TimestampedWord(word['Word'], start, end))
-        return result.text, timestamped_words
-    elif result.reason == speechsdk.ResultReason.NoMatch:
-        print("No speech could be recognized: {}".format(result.no_match_details))
-    elif result.reason == speechsdk.ResultReason.Canceled:
-        print("Translation canceled: {}".format(result.cancellation_details.reason))
-        if result.cancellation_details.reason == speechsdk.CancellationReason.Error:
-            print("Error details: {}".format(result.cancellation_details.error_details))
-    return None, None
-    a=0
+#     # Check the result
+#     if result.reason == speechsdk.ResultReason.RecognizedSpeech:
+#         print("Recognized: {}".format(result.text))
+#         result_json = json.loads(result.json)
+#         timestamped_words = []
+#         for word in result_json['NBest'][0]['Words']:
+#             start = word['Offset'] / 10000000
+#             end = start + word['Duration'] / 10000000
+#             timestamped_words.append(TimestampedWord(word['Word'], start, end))
+#         return result.text, timestamped_words
+#     elif result.reason == speechsdk.ResultReason.NoMatch:
+#         print("No speech could be recognized: {}".format(result.no_match_details))
+#     elif result.reason == speechsdk.ResultReason.Canceled:
+#         print("Translation canceled: {}".format(result.cancellation_details.reason))
+#         if result.cancellation_details.reason == speechsdk.CancellationReason.Error:
+#             print("Error details: {}".format(result.cancellation_details.error_details))
+#     return None, None
+#     a=0
+
+    
 
 def parse_alignment(original: str, translation: str, alignment_text: str) -> List[WordAlignment]:
     """
@@ -251,10 +285,12 @@ def split_clips(audio_segment, clip_file, start, end):
         newAudio.export(clip_file, format="wav")  # Exports to a wav file in the current path.
 
 
-def process_video(speech_config, youtube_id, boundaries) -> List[Tuple[int, int, List[WordAlignment], List[TimestampedWord], str]]:
+def process_video(speech_config, asr, youtube_id, boundaries) -> List[Tuple[int, int, List[WordAlignment], List[TimestampedWord], str]]:
     processed_file = os.path.join('data', youtube_id, 'processed.pkl')
     if os.path.exists(processed_file):
-        return pickle.load(open(processed_file, 'rb'))
+        res = pickle.load(open(processed_file, 'rb'))
+        print(res)
+        return res
     else:
         from pydub import AudioSegment
         audio_segment = AudioSegment.from_wav(os.path.join('data', youtube_id, 'full.wav'))
@@ -275,7 +311,7 @@ def process_video(speech_config, youtube_id, boundaries) -> List[Tuple[int, int,
         # We can use a with statement to ensure threads are cleaned up promptly
         # results = [recognize_and_translate(speech_config, clip_file, start, end) for clip_file, start, end in zip(clip_files, starts, ends)]
         with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
-            results = list(executor.map(recognize_and_translate, repeat(speech_config), clip_files, starts, ends))
+            results = list(executor.map(asr.recognize_and_translate, repeat(speech_config), clip_files, starts, ends))
         for result in results:
             recognition, timestamped_words, translation, alignment, start, end = result
             if translation is None:
