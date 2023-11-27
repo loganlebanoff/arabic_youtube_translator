@@ -24,6 +24,7 @@ from util import (
     postprocess,
     WhisperASR,
     AzureASR,
+    AzureTranslator,
     Processor,
 )
 
@@ -33,10 +34,13 @@ def main():
 
     url = "https://www.youtube.com/watch?v=9EzXFgSebKs"
 
-    asr = WhisperASR()
-    # asr = AzureASR()
+    # asr = WhisperASR()
+    asr = AzureASR()
 
-    processor = Processor(asr)
+    print("Loading Translator model")
+    translator = AzureTranslator()
+
+    processor = Processor(asr, translator)
 
     print(url)
     if url != '':

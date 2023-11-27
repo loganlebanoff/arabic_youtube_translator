@@ -13,6 +13,7 @@ from util import (
     postprocess,
     WhisperASR,
     AzureASR,
+    AzureTranslator,
     Processor,
 )
 
@@ -22,7 +23,10 @@ def load_model():
     # asr = WhisperASR()
     asr = AzureASR()
 
-    processor = Processor(asr)
+    print("Loading Translator model")
+    translator = AzureTranslator()
+
+    processor = Processor(asr, translator)
     return processor
 
 

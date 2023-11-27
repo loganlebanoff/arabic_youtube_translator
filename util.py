@@ -141,14 +141,54 @@ class AzureASR:
                 print("Error details: {}".format(result.cancellation_details.error_details))
         return None, None
 
+
+class AzureTranslator:
+    def __init__(self):
+        pass
+
+    def translate(self, text) -> Tuple[str, List[WordAlignment]]:
+        import os, requests, uuid, json
+
+        subscription_key = AZURE_TRANSLATION_KEY
+        endpoint = 'https://api.cognitive.microsofttranslator.com'
+
+        # If you encounter any issues with the base_url or path, make sure
+        # that you are using the latest endpoint: https://docs.microsoft.com/azure/cognitive-services/translator/reference/v3-0-translate
+        path = '/translate?api-version=3.0'
+        params = '&from=ar-EG&to=en&includeAlignment=true'
+        constructed_url = endpoint + path + params
+
+        headers = {
+            'Ocp-Apim-Subscription-Key': subscription_key,
+            'Ocp-Apim-Subscription-Region': 'eastus',
+            'Content-type': 'application/json',
+            'X-ClientTraceId': str(uuid.uuid4()),
+        }
+
+        # You can pass more than one object in body.
+        body = [{
+            'text': text,
+        }]
+        print('Translation job started')
+        request = requests.post(constructed_url, headers=headers, json=body)
+        response = request.json()
+        if 'error' in response or len(response) == 0 or len(response[0]['translations']) == 0:
+            return None, None
+        result = response[0]['translations'][0]
+        print("Translation: {}".format(result['text']))
+
+        alignment = parse_alignment(text, result['text'], result['alignment']['proj'])
+        return result['text'], alignment
+
 class Processor:
 
-    def __init__(self, asr):
+    def __init__(self, asr, translator):
         self.asr = asr
+        self.translator = translator
 
     def recognize_and_translate(self, file, start, end) -> Tuple[str, List[TimestampedWord], str, List[WordAlignment], float, float]:
         recognition, timestamped_words = self.asr.transcribe(file)
-        translation, alignment = translate(recognition)
+        translation, alignment = self.translator.translate(recognition)
         return recognition, timestamped_words, translation, alignment, start, end
 
 def is_inside_ranges(translation_alignment: List[WordAlignment], separator_idx: int):
@@ -217,40 +257,6 @@ def parse_alignment(original: str, translation: str, alignment_text: str) -> Lis
         translation_word = translation[translation_start:translation_end]
         alignment.append(WordAlignment(original_word, translation_word, original_start, original_end, translation_start, translation_end))
     return alignment
-
-def translate(recognition: str) -> Tuple[str, List[WordAlignment]]:
-    import os, requests, uuid, json
-
-    subscription_key = AZURE_TRANSLATION_KEY
-    endpoint = 'https://api.cognitive.microsofttranslator.com'
-
-    # If you encounter any issues with the base_url or path, make sure
-    # that you are using the latest endpoint: https://docs.microsoft.com/azure/cognitive-services/translator/reference/v3-0-translate
-    path = '/translate?api-version=3.0'
-    params = '&from=ar-EG&to=en&includeAlignment=true'
-    constructed_url = endpoint + path + params
-
-    headers = {
-        'Ocp-Apim-Subscription-Key': subscription_key,
-        'Ocp-Apim-Subscription-Region': 'eastus',
-        'Content-type': 'application/json',
-        'X-ClientTraceId': str(uuid.uuid4()),
-    }
-
-    # You can pass more than one object in body.
-    body = [{
-        'text': recognition,
-    }]
-    print('Translation job started')
-    request = requests.post(constructed_url, headers=headers, json=body)
-    response = request.json()
-    if 'error' in response or len(response) == 0 or len(response[0]['translations']) == 0:
-        return None, None
-    result = response[0]['translations'][0]
-    print("Translation: {}".format(result['text']))
-
-    alignment = parse_alignment(recognition, result['text'], result['alignment']['proj'])
-    return result['text'], alignment
 
 def download_video(url, filename):
     if os.path.exists(filename):
