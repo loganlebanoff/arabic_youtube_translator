@@ -1,5 +1,4 @@
 
-
 # if __name__ == "__main__":
 #     from pyannote.audio.pipelines import VoiceActivityDetection
 #     pipeline = VoiceActivityDetection(
@@ -23,13 +22,21 @@ from util import (
     get_boundaries,
     process_video,
     postprocess,
+    WhisperASR,
+    AzureASR,
+    Processor,
 )
 
 def main():
     if not os.path.exists('data'):
         os.makedirs('data')
 
-    url = "https://www.youtube.com/watch?v=Lv5-7A6Ybq4"
+    url = "https://www.youtube.com/watch?v=9EzXFgSebKs"
+
+    asr = WhisperASR()
+    # asr = AzureASR()
+
+    processor = Processor(asr)
 
     print(url)
     if url != '':
@@ -47,11 +54,10 @@ def main():
         embed_url = url.replace('watch?v=', 'embed/') + '?&autoplay=1&start=' + str(start_secs)
 
 
-        speech_config = load_speech_config()
         boundaries = get_boundaries(filename)
         # print(boundaries)
         # print(len(boundaries))
-        start_end_translation_list = process_video(speech_config, youtube_id, boundaries)
+        start_end_translation_list = process_video(processor, youtube_id, boundaries)
         print([x[:3] for x in start_end_translation_list])
         postprocessed_start_end_translation_list = postprocess(start_end_translation_list, youtube_id)
         print(postprocessed_start_end_translation_list)

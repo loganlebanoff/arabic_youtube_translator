@@ -79,14 +79,77 @@ class WhisperASR:
 
         print(result["segments"])  # after alignment
 
-        result_text = result["text"]
+        result_text = " ".join([segment["text"] for segment in result["segments"]])
         timestamped_words = []
-        for word in result["segments"]["words"]:
-            start = word['start']
-            end = word['end']
-            timestamped_words.append(TimestampedWord(word['word'], start, end))
+        cur_nontimestamped_word = []
+        prev_end = 0
+        for segment in result["segments"]:
+            for word in segment["words"]:
+                if "start" not in word:
+                    # Accumulate words that don't have timestamps. This should be rare -- it seems to happen when the word is
+                    # in English.
+                    cur_nontimestamped_word.append(word["word"])
+                else:
+                    # Flush accumulated words without timestamps once we hit a word with a timestamp
+                    if len(cur_nontimestamped_word) > 0:
+                        timestamped_words.append(TimestampedWord(" ".join(cur_nontimestamped_word), prev_end, word["start"]))
+                        cur_nontimestamped_word = []
+                    
+                    # Then handle the word with a timestamp
+                    start = word['start']
+                    end = word['end']
+                    timestamped_words.append(TimestampedWord(word['word'], start, end))
+                    prev_end = end
+        # Flush any remaining words without timestamps
+        if len(cur_nontimestamped_word) > 0:
+            timestamped_words.append(TimestampedWord(" ".join(cur_nontimestamped_word), prev_end, prev_end + 5))
         return result_text, timestamped_words
 
+class AzureASR:
+    def __init__(self):
+        self.speech_config = load_speech_config()
+
+    def transcribe(self, audio_file) -> Tuple[str, List[TimestampedWord]]:
+        audio_config = speechsdk.AudioConfig(filename=audio_file)
+        recognizer = speechsdk.SpeechRecognizer(
+            speech_config=self.speech_config, audio_config=audio_config)
+
+        # Starts translation, and returns after a single utterance is recognized. The end of a
+        # single utterance is determined by listening for silence at the end or until a maximum of 15
+        # seconds of audio is processed. The task returns the recognition text as result.
+        # Note: Since recognize_once() returns only a single utterance, it is suitable only for single
+        # shot recognition like command or query.
+        # For long-running multi-utterance recognition, use start_continuous_recognition() instead.
+        print('Recognition job started')
+        result = recognizer.recognize_once()
+
+        # Check the result
+        if result.reason == speechsdk.ResultReason.RecognizedSpeech:
+            print("Recognized: {}".format(result.text))
+            result_json = json.loads(result.json)
+            timestamped_words = []
+            for word in result_json['NBest'][0]['Words']:
+                start = word['Offset'] / 10000000
+                end = start + word['Duration'] / 10000000
+                timestamped_words.append(TimestampedWord(word['Word'], start, end))
+            return result.text, timestamped_words
+        elif result.reason == speechsdk.ResultReason.NoMatch:
+            print("No speech could be recognized: {}".format(result.no_match_details))
+        elif result.reason == speechsdk.ResultReason.Canceled:
+            print("Translation canceled: {}".format(result.cancellation_details.reason))
+            if result.cancellation_details.reason == speechsdk.CancellationReason.Error:
+                print("Error details: {}".format(result.cancellation_details.error_details))
+        return None, None
+
+class Processor:
+
+    def __init__(self, asr):
+        self.asr = asr
+
+    def recognize_and_translate(self, file, start, end) -> Tuple[str, List[TimestampedWord], str, List[WordAlignment], float, float]:
+        recognition, timestamped_words = self.asr.transcribe(file)
+        translation, alignment = translate(recognition)
+        return recognition, timestamped_words, translation, alignment, start, end
 
 def is_inside_ranges(translation_alignment: List[WordAlignment], separator_idx: int):
     for alignment in translation_alignment:
@@ -130,39 +193,6 @@ def load_speech_config():
     speech_config.request_word_level_timestamps()
     speech_config.output_format = speechsdk.OutputFormat(1)
     return speech_config
-
-# def recognize(speech_config, file) -> Tuple[str, List[TimestampedWord]]:
-#     audio_config = speechsdk.AudioConfig(filename=file)
-#     recognizer = speechsdk.SpeechRecognizer(
-#         speech_config=speech_config, audio_config=audio_config)
-
-#     # Starts translation, and returns after a single utterance is recognized. The end of a
-#     # single utterance is determined by listening for silence at the end or until a maximum of 15
-#     # seconds of audio is processed. The task returns the recognition text as result.
-#     # Note: Since recognize_once() returns only a single utterance, it is suitable only for single
-#     # shot recognition like command or query.
-#     # For long-running multi-utterance recognition, use start_continuous_recognition() instead.
-#     print('Recognition job started')
-#     result = recognizer.recognize_once()
-
-#     # Check the result
-#     if result.reason == speechsdk.ResultReason.RecognizedSpeech:
-#         print("Recognized: {}".format(result.text))
-#         result_json = json.loads(result.json)
-#         timestamped_words = []
-#         for word in result_json['NBest'][0]['Words']:
-#             start = word['Offset'] / 10000000
-#             end = start + word['Duration'] / 10000000
-#             timestamped_words.append(TimestampedWord(word['Word'], start, end))
-#         return result.text, timestamped_words
-#     elif result.reason == speechsdk.ResultReason.NoMatch:
-#         print("No speech could be recognized: {}".format(result.no_match_details))
-#     elif result.reason == speechsdk.ResultReason.Canceled:
-#         print("Translation canceled: {}".format(result.cancellation_details.reason))
-#         if result.cancellation_details.reason == speechsdk.CancellationReason.Error:
-#             print("Error details: {}".format(result.cancellation_details.error_details))
-#     return None, None
-#     a=0
 
     
 
@@ -222,11 +252,6 @@ def translate(recognition: str) -> Tuple[str, List[WordAlignment]]:
     alignment = parse_alignment(recognition, result['text'], result['alignment']['proj'])
     return result['text'], alignment
 
-def recognize_and_translate(speech_config, file, start, end) -> Tuple[str, List[TimestampedWord], str, List[WordAlignment], float, float]:
-    recognition, timestamped_words = recognize(speech_config, file)
-    translation, alignment = translate(recognition)
-    return recognition, timestamped_words, translation, alignment, start, end
-
 def download_video(url, filename):
     if os.path.exists(filename):
         return
@@ -285,7 +310,7 @@ def split_clips(audio_segment, clip_file, start, end):
         newAudio.export(clip_file, format="wav")  # Exports to a wav file in the current path.
 
 
-def process_video(speech_config, asr, youtube_id, boundaries) -> List[Tuple[int, int, List[WordAlignment], List[TimestampedWord], str]]:
+def process_video(processor, youtube_id, boundaries) -> List[Tuple[int, int, List[WordAlignment], List[TimestampedWord], str]]:
     processed_file = os.path.join('data', youtube_id, 'processed.pkl')
     if os.path.exists(processed_file):
         res = pickle.load(open(processed_file, 'rb'))
@@ -309,9 +334,9 @@ def process_video(speech_config, asr, youtube_id, boundaries) -> List[Tuple[int,
             executor.map(split_clips, repeat(audio_segment), clip_files, starts, ends)
 
         # We can use a with statement to ensure threads are cleaned up promptly
-        # results = [recognize_and_translate(speech_config, clip_file, start, end) for clip_file, start, end in zip(clip_files, starts, ends)]
+        # results = [processor.recognize_and_translate(clip_file, start, end) for clip_file, start, end in zip(clip_files, starts, ends)]
         with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
-            results = list(executor.map(asr.recognize_and_translate, repeat(speech_config), clip_files, starts, ends))
+            results = list(executor.map(processor.recognize_and_translate, clip_files, starts, ends))
         for result in results:
             recognition, timestamped_words, translation, alignment, start, end = result
             if translation is None:

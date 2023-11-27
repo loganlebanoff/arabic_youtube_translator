@@ -1,23 +1,8 @@
 import streamlit as st
-import pafy
 import datetime
 import time
-import youtube_dl
-import azure.cognitiveservices.speech as speechsdk
 import os
-import json
 import shutil
-from itertools import repeat
-import concurrent
-#from keys import AZURE_KEY, AZURE_REGION
-
-AZURE_KEY = st.secrets['AZURE_KEY']
-AZURE_TRANSLATION_KEY = st.secrets['AZURE_TRANSLATION_KEY']
-AZURE_REGION = st.secrets['AZURE_REGION']
-
-import wave
-import contextlib
-import subprocess
 
 from util import (
     download_video,
@@ -27,12 +12,18 @@ from util import (
     process_video,
     postprocess,
     WhisperASR,
+    AzureASR,
+    Processor,
 )
 
-@st.cache(allow_output_mutation=True)
-def load_asr():
+@st.cache_resource
+def load_model():
     print("Loading ASR model")
-    return WhisperASR()
+    # asr = WhisperASR()
+    asr = AzureASR()
+
+    processor = Processor(asr)
+    return processor
 
 
 def sleep(seconds, transcript_empty, prev_translation):
@@ -85,7 +76,7 @@ def main():
     url = url_dropdown.strip() if url_dropdown != '' else url_textbox.strip()
 
     print(url)
-    asr = load_asr()
+    processor = load_model()
     if url != '':
         youtube_id = url.split('?v=')[-1]
         st.sidebar.button('Delete cache for this video', on_click=delete_cache, args=[youtube_id])
@@ -132,13 +123,12 @@ def main():
         # empty.video(url, start_time=start_time)
         empty.markdown(my_html, unsafe_allow_html=True)
 
-        speech_config = load_speech_config()
         with st.spinner('Calculating boundaries'):
             boundaries = get_boundaries(filename)
         # print(boundaries)
         # print(len(boundaries))
         with st.spinner('Processing video'):
-            start_end_translation_list = process_video(speech_config, asr, youtube_id, boundaries)
+            start_end_translation_list = process_video(processor, youtube_id, boundaries)
         print([x[:3] for x in start_end_translation_list])
         postprocessed_start_end_translation_list = postprocess(start_end_translation_list, youtube_id)
         print(postprocessed_start_end_translation_list)
