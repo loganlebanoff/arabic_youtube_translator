@@ -64,13 +64,11 @@ def main():
         # print(boundaries)
         # print(len(boundaries))
         start_end_translation_list = process_video(processor, youtube_id, boundaries)
-        print([x[:3] for x in start_end_translation_list])
+        print([x for x in start_end_translation_list])
         postprocessed_start_end_translation_list = postprocess(start_end_translation_list, youtube_id)
         print(postprocessed_start_end_translation_list)
         # for clip_idx, (start, end, translation) in enumerate(start_end_translation_list):
         #     print(start, end, translation)
-
-        print(postprocessed_start_end_translation_list)
 
 
 if __name__ == '__main__':

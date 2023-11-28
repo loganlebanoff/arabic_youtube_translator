@@ -406,24 +406,39 @@ def get_ranges_in_range(translation_alignment: List[WordAlignment], start, end):
     return valid_ranges
 
 def postprocess(start_end_translation_list, youtube_id) -> List[Tuple[int, int, str]]:
+    # Define the path to the postprocessed file for the given YouTube ID
     postprocessed_file = os.path.join('data', youtube_id, 'postprocessed.json')
+    
+    # Check if the postprocessed file already exists and load it if present
     if os.path.exists(postprocessed_file):
         return json.load(open(postprocessed_file, encoding='utf8'))
     else:
+        # Initialize an empty list to store postprocessed data
         postprocessed = []
+
+        # Iterate over each entry in the start_end_translation_list
         for start, end, translation, alignment, timestamped_words, recognition in start_end_translation_list:
-            arabic_text = recognition
-            separators = [',', '.', '?']
-            arabic_separators = ['،', '.', '؟']
+            arabic_text = recognition # The recognized Arabic text
+            separators = [',', '.', '?'] # English separators
+            arabic_separators = ['،', '.', '؟'] # Arabic separators
+
+            # Find indices in the translation where separators occur and are not inside alignment ranges
             separator_indices = [i for i, c in enumerate(translation) if c in separators and not is_inside_ranges(alignment, i)] + [len(translation)]
 
-
+            # Initialize variables to track the previous phrase ends and timestamps
             prev_phrase_end_arabic = 0
             prev_phrase_end_english = 0
             prev_token_idx_end = -1
             prev_end_timestamp = start
+
+            # For each English phrase, the function finds the corresponding range in the original language (Arabic) text. 
+            # It ensures that each English phrase is accurately matched with the correct segment of Arabic text.
+            # Iterate over each found separator index
             for phrase_idx, separator_idx in enumerate(separator_indices):
+                # Extract the English phrase between the previous end and the current separator
                 english_phrase = translation[prev_phrase_end_english: separator_idx+1].strip()
+
+                # Skip empty phrases or very short phrases unless it's the last phrase
                 if english_phrase == '':
                     continue
                 if len(english_phrase) < 15 and phrase_idx != len(separator_indices) - 1:
@@ -432,19 +447,29 @@ def postprocess(start_end_translation_list, youtube_id) -> List[Tuple[int, int, 
                     next_english_phrase = translation[separator_idx+1: separator_indices[phrase_idx+1]+1].strip()
                     if len(next_english_phrase) < 15:
                         continue
+
+                # Get the range of words in the alignment that corresponds to the current English phrase
                 ranges = get_ranges_in_range(alignment, prev_phrase_end_english-2, separator_idx+2)
                 if len(ranges) == 0:
                     continue
                 max_range = max(ranges, key=lambda x: x.original_end)
                 phrase_end = max_range.original_end
+
+                # Extract the corresponding Arabic phrase
                 arabic_phrase = arabic_text[prev_phrase_end_arabic: phrase_end].strip()
                 for sep in arabic_separators:
                     arabic_phrase = arabic_phrase.replace(sep, '')
+
+                # Skip if the Arabic phrase is empty
                 if arabic_phrase == '':
                     continue
+
+                # Find the last Arabic token and count its occurrences
                 last_arabic_token = arabic_phrase.split()[-1]
                 last_arabic_token_count = sum([1 for token in arabic_phrase.split() if token == last_arabic_token])
                 arabic_word_matches = [(w_idx, w) for w_idx, w in enumerate(timestamped_words) if w.word == last_arabic_token and w_idx > prev_token_idx_end]
+
+                # Handle cases of token mismatch
                 if last_arabic_token_count > len(arabic_word_matches):
                     non_matches = [(w_idx, w) for w_idx, w in enumerate(timestamped_words) if w.word not in arabic_phrase.split() and w_idx > prev_token_idx_end]
                     if len(non_matches) == 0:
@@ -454,16 +479,19 @@ def postprocess(start_end_translation_list, youtube_id) -> List[Tuple[int, int, 
                         print(timestamped_words)
                     arabic_word = non_matches[0][1]
                     arabic_word_idx = non_matches[0][0]
-                    a=0
                 else:
                     arabic_word = arabic_word_matches[last_arabic_token_count-1][1]
                     arabic_word_idx = arabic_word_matches[last_arabic_token_count-1][0]
+
+                # Calculate the end timestamp for the phrase and append it to the postprocessed list
                 end_timestamp = start + arabic_word.end
                 postprocessed.append((prev_end_timestamp, end_timestamp, english_phrase))
+
+                # Update the previous phrase ends and token index for the next iteration
                 prev_phrase_end_english = separator_idx+1
                 prev_token_idx_end = arabic_word_idx
                 prev_phrase_end_arabic = phrase_end
                 prev_end_timestamp = end_timestamp
-                a=0
-            a=0
+
+        # Return the postprocessed data
         return postprocessed
